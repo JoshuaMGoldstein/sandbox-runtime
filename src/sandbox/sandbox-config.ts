@@ -766,6 +766,12 @@ export const NetworkConfigSchema = z.object({
     .describe(
       'If true, hosts not in allowedDomains are denied without consulting the ask callback. Set this when allowedDomains is policy enforcement, not a prompt-suppression hint.',
     ),
+  airGapped: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true, create an isolated network namespace without starting or binding any proxy bridge. This is stronger than an empty allowlist, which preserves a proxy for later policy updates.',
+    ),
   deniedResolvedAddresses: z
     .array(addressRangeSchema)
     .optional()
@@ -912,6 +918,30 @@ export const NetworkConfigSchema = z.object({
   ),
 })
 
+const absoluteNormalizedMountPathSchema = z
+  .string()
+  .refine(
+    value =>
+      posixPath.isAbsolute(value) && posixPath.normalize(value) === value,
+    'Mount paths must be absolute and normalized',
+  )
+  .refine(
+    value => !value.includes('\0'),
+    'Mount paths must not contain NUL bytes',
+  )
+
+const explicitMountSchema = z
+  .object({
+    source: absoluteNormalizedMountPathSchema.describe(
+      'Absolute normalized host path to mount.',
+    ),
+    destination: absoluteNormalizedMountPathSchema.describe(
+      'Absolute normalized path inside the Linux sandbox.',
+    ),
+    mode: z.enum(['ro', 'rw']).describe('Read-only or read-write mount mode.'),
+  })
+  .strict()
+
 /**
  * Filesystem configuration schema for validation
  */
@@ -948,6 +978,12 @@ export const FilesystemConfigSchema = z.object({
     .optional()
     .describe(
       'Allow writes to .git/config files (default: false). Enables git remote URL updates while keeping .git/hooks protected.',
+    ),
+  explicitMounts: z
+    .array(explicitMountSchema)
+    .optional()
+    .describe(
+      'Linux-only explicit host-to-sandbox bind mounts emitted after filesystem policy mounts.',
     ),
 })
 
@@ -1257,6 +1293,34 @@ export const SandboxRuntimeConfigSchema = z
     ),
   })
   .superRefine((cfg, ctx) => {
+    if (cfg.network.airGapped && cfg.network.allowedDomains.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['network', 'allowedDomains'],
+        message: 'network.airGapped requires an empty allowedDomains list',
+      })
+    }
+
+    const mounts = cfg.filesystem.explicitMounts ?? []
+    for (let index = 0; index < mounts.length; index++) {
+      const mount = mounts[index]!
+      if (
+        mounts.some(
+          (other, otherIndex) =>
+            otherIndex !== index &&
+            (other.destination === mount.destination ||
+              other.destination.startsWith(mount.destination + '/') ||
+              mount.destination.startsWith(other.destination + '/')),
+        )
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['filesystem', 'explicitMounts', index, 'destination'],
+          message: 'Mount destinations must not overlap',
+        })
+      }
+    }
+
     // filesystem.disabled drops every filesystem rule, the credential file
     // denies included (getFsReadConfig, getFsWriteConfig and
     // computeWindowsFsAccessSet all short-circuit on it), so an inert deny

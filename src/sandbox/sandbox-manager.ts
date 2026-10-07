@@ -948,6 +948,10 @@ async function initialize(
     }
   }
 
+  // An air-gapped sandbox needs only its per-command network namespace. It
+  // must not start host proxy infrastructure that would later be bind-mounted.
+  if (config.network.airGapped) return
+
   // Initialize network infrastructure
   initializationPromise = (async () => {
     try {
@@ -1909,11 +1913,12 @@ async function wrapWithSandboxAgain(
   // This includes empty allowedDomains which means "block all network"
   const needsNetworkRestriction = hasNetworkConfig
 
-  // Network PROXY is needed whenever network config is specified
-  // Even with empty allowedDomains, we route through proxy so that:
-  // 1. updateConfig() can enable network access for already-running processes
-  // 2. The proxy blocks all requests when allowlist is empty
-  const needsNetworkProxy = hasNetworkConfig
+  // Network PROXY is normally needed whenever network config is specified,
+  // including an empty allowlist so updateConfig() can enable access later.
+  // airGapped is the immutable exception: it retains --unshare-net but has no
+  // bridge, proxy process, socket mount, or proxy environment injection.
+  const needsNetworkProxy =
+    hasNetworkConfig && !customConfig?.network?.airGapped
 
   // Wait for network initialization only if proxy is actually needed
   if (needsNetworkProxy) {
@@ -2020,6 +2025,7 @@ async function wrapWithSandboxAgain(
         binShell,
         mandatoryDenySearchDepth: getMandatoryDenySearchDepth(),
         allowGitConfig: getAllowGitConfig(),
+        explicitMounts: config?.filesystem.explicitMounts,
         gitSafeDirectories,
         seccompConfig: getSeccompConfig(),
         bwrapPath: config?.bwrapPath,
@@ -2086,7 +2092,9 @@ async function wrapWithSandboxArgv(
     const hasNetworkConfig =
       customConfig?.network?.allowedDomains !== undefined ||
       config?.network?.allowedDomains !== undefined
-    if (hasNetworkConfig) {
+    const needsNetworkProxy =
+      hasNetworkConfig && !customConfig?.network?.airGapped
+    if (needsNetworkProxy) {
       await waitForNetworkInitialization()
     }
     const credentialRestrictions = getCredentialRestrictions(
@@ -2157,9 +2165,9 @@ async function wrapWithSandboxArgv(
     return wrapCommandWithSandboxWindows({
       command,
       commandId: options?.commandId,
-      httpProxyPort: hasNetworkConfig ? getProxyPort() : undefined,
-      socksProxyPort: hasNetworkConfig ? getSocksProxyPort() : undefined,
-      proxyAuthToken: hasNetworkConfig ? proxyAuthToken : undefined,
+      httpProxyPort: needsNetworkProxy ? getProxyPort() : undefined,
+      socksProxyPort: needsNetworkProxy ? getSocksProxyPort() : undefined,
+      proxyAuthToken: needsNetworkProxy ? proxyAuthToken : undefined,
       // mode:'deny' env vars are structurally absent (fresh
       // srt-sandbox profile env). mode:'mask' sentinels are
       // passed via the --env overlay so the sandboxed child sees
@@ -2198,7 +2206,9 @@ async function wrapWithSandboxArgv(
     options,
   )
   const shell = binShell ?? '/bin/bash'
-  return { argv: [shell, '-c', wrapped], env: process.env }
+  const environment = customConfig?.environment ?? config?.environment
+  const env = environment?.clear ? { ...environment.variables } : process.env
+  return { argv: [shell, '-c', wrapped], env }
 }
 
 /**

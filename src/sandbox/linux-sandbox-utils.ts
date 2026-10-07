@@ -86,6 +86,12 @@ export interface LinuxSandboxParams {
   mandatoryDenySearchDepth?: number
   /** Allow writes to .git/config files (default: false) */
   allowGitConfig?: boolean
+  /** Explicit host-to-sandbox mounts emitted after filesystem policy mounts. */
+  explicitMounts?: Array<{
+    source: string
+    destination: string
+    mode: 'ro' | 'rw'
+  }>
   /**
    * Directories to emit as `safe.directory` via `GIT_CONFIG_*` env
    * vars (see {@link buildPosixGitSafeDirEnv}). Under `--unshare-user`
@@ -3208,6 +3214,7 @@ export async function wrapCommandWithSandboxLinux(
     binShell,
     mandatoryDenySearchDepth = DEFAULT_MANDATORY_DENY_SEARCH_DEPTH,
     allowGitConfig = false,
+    explicitMounts,
     gitSafeDirectories,
     seccompConfig,
     bwrapPath,
@@ -3448,6 +3455,13 @@ export async function wrapCommandWithSandboxLinux(
     )
     const mountsStart = bwrapArgs.length
     bwrapArgs.push(...fsArgs)
+    for (const mount of explicitMounts ?? []) {
+      bwrapArgs.push(
+        mount.mode === 'ro' ? '--ro-bind' : '--bind',
+        mount.source,
+        mount.destination,
+      )
+    }
     const mounts = { start: mountsStart, end: bwrapArgs.length }
 
     // Always bind /dev
