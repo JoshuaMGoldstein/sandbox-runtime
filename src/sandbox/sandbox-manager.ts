@@ -35,9 +35,8 @@ import {
   type MitmCA,
 } from './mitm-ca.js'
 import { logForDebugging } from '../utils/debug.js'
-import { whichSync } from '../utils/which.js'
-import type { RipgrepConfig } from '../utils/ripgrep.js'
 import { getPlatform, getWslVersion } from '../utils/platform.js'
+import type { RipgrepConfig } from '../utils/ripgrep.js'
 import * as fs from 'fs'
 import { randomBytes } from 'node:crypto'
 import type {
@@ -1061,7 +1060,7 @@ function isSandboxingEnabled(): boolean {
  * the only platform where the sync and async variants differ.
  */
 function checkDependenciesCommon(
-  ripgrepConfig?: RipgrepConfig,
+  _ripgrepConfig?: RipgrepConfig,
 ):
   | { done: SandboxDependencyCheck }
   | { windows: { sublayerGuid?: string; srtWin: SrtWinSpawn } } {
@@ -1074,14 +1073,6 @@ function checkDependenciesCommon(
 
   const platform = getPlatform()
   if (platform === 'linux') {
-    // ripgrep is Linux-only: it's used by linuxGetMandatoryDenyPaths() to
-    // expand glob deny-patterns to concrete paths for bwrap. macOS seatbelt
-    // profiles take regex patterns directly, so rg is never invoked there.
-    const rgToCheck = ripgrepConfig ?? config?.ripgrep ?? { command: 'rg' }
-    if (whichSync(rgToCheck.command) === null) {
-      errors.push(`ripgrep (${rgToCheck.command}) not found`)
-    }
-
     const linuxDeps = checkLinuxDependencies({
       seccompConfig: config?.seccomp,
       bwrapPath: config?.bwrapPath,
@@ -1111,7 +1102,6 @@ function checkDependenciesCommon(
 
 /**
  * Check sandbox dependencies for the current platform
- * @param ripgrepConfig - Ripgrep command to check. If not provided, uses config from initialization or defaults to 'rg'
  * @returns { warnings, errors } - errors mean sandbox cannot run, warnings mean degraded functionality
  */
 function checkDependencies(
@@ -1619,10 +1609,6 @@ function getAllowAppleEvents(): boolean | undefined {
   return config?.allowAppleEvents
 }
 
-function getRipgrepConfig(): RipgrepConfig {
-  return config?.ripgrep ?? { command: 'rg' }
-}
-
 function getMandatoryDenySearchDepth(): number {
   return config?.mandatoryDenySearchDepth ?? 3
 }
@@ -1962,6 +1948,7 @@ async function wrapWithSandboxAgain(
 
   // Check custom config to allow pseudo-terminal (can be applied dynamically)
   const allowPty = customConfig?.allowPty ?? config?.allowPty
+  const environment = customConfig?.environment ?? config?.environment
 
   const gitSafeDirectories = getGitSafeDirectories(customConfig)
 
@@ -1982,6 +1969,8 @@ async function wrapWithSandboxAgain(
         writeConfig,
         unsetEnvVars: credentialRestrictions.unsetEnvVars,
         setEnvVars: credentialRestrictions.setEnvVars,
+        clearEnvironment: environment?.clear ?? false,
+        environmentVariables: environment?.variables,
         maskedFileBinds: credentialRestrictions.maskedFileBinds,
         degradeToDenyPaths: credentialRestrictions.degradeToDenyPaths,
         allowUnixSockets: getAllowUnixSockets(),
@@ -2022,12 +2011,13 @@ async function wrapWithSandboxAgain(
         writeConfig,
         unsetEnvVars: credentialRestrictions.unsetEnvVars,
         setEnvVars: credentialRestrictions.setEnvVars,
+        clearEnvironment: environment?.clear ?? false,
+        environmentVariables: environment?.variables,
         maskedFileBinds: credentialRestrictions.maskedFileBinds,
         maskedFileStoreDir: credentialRestrictions.maskedFileStoreDir,
         enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(),
         allowAllUnixSockets: getAllowAllUnixSockets(),
         binShell,
-        ripgrepConfig: getRipgrepConfig(),
         mandatoryDenySearchDepth: getMandatoryDenySearchDepth(),
         allowGitConfig: getAllowGitConfig(),
         gitSafeDirectories,

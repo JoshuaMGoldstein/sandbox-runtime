@@ -964,6 +964,38 @@ export const IgnoreViolationsConfigSchema = z
 /**
  * Ripgrep configuration schema
  */
+/**
+ * Exact child environment for embedders that cannot permit ambient host
+ * variables to reach sandboxed commands. This deliberately has no inherit
+ * mode: either the caller clears first and supplies every value, or SRT keeps
+ * its existing compatibility behavior.
+ */
+const environmentVariableNameSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    'Environment variable names must be shell-safe identifiers',
+  )
+
+const environmentVariableValueSchema = z
+  .string()
+  .refine(
+    value => !value.includes('\0'),
+    'Environment variable values must not contain NUL bytes',
+  )
+
+export const EnvironmentConfigSchema = z
+  .object({
+    clear: z
+      .literal(true)
+      .describe('Clear the inherited environment before applying variables'),
+    variables: z
+      .record(environmentVariableNameSchema, environmentVariableValueSchema)
+      .default({})
+      .describe('The complete environment visible to the sandboxed child'),
+  })
+  .strict()
+
 export const RipgrepConfigSchema = z.object({
   command: z.string().describe('The ripgrep command to execute'),
   args: z
@@ -1142,6 +1174,9 @@ export const SandboxRuntimeConfigSchema = z
     credentials: CredentialsConfigSchema.optional().describe(
       'Credential handling configuration. Only the explicitly declared files ' +
         'and environment variables are restricted.',
+    ),
+    environment: EnvironmentConfigSchema.optional().describe(
+      'Optional exact child environment. When set, inherited host environment variables are cleared before these values are applied.',
     ),
     ignoreViolations: IgnoreViolationsConfigSchema.optional().describe(
       'Optional configuration for ignoring specific violations',
@@ -1503,6 +1538,7 @@ export type CredentialEnvVarConfig = z.infer<
   typeof CredentialEnvVarConfigSchema
 >
 export type CredentialsConfig = z.infer<typeof CredentialsConfigSchema>
+export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>
 export type AwsPairConfig = z.infer<typeof AwsPairConfigSchema>
 export type Sigv4Config = z.infer<typeof Sigv4ConfigSchema>
 export type IgnoreViolationsConfig = z.infer<

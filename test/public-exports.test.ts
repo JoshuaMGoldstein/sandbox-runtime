@@ -17,6 +17,7 @@ import * as srt from '../src/index.js'
 const PUBLIC_VALUE_EXPORTS = [
   'CredentialsConfigSchema',
   'DEFAULT_WINDOWS_PROXY_PORT_RANGE',
+  'EnvironmentConfigSchema',
   'FilesystemConfigSchema',
   'GitConfigSchema',
   'IgnoreViolationsConfigSchema',

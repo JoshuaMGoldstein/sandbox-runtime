@@ -6,7 +6,6 @@ import {
   afterAll,
   beforeEach,
   afterEach,
-  spyOn,
 } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
 import {
@@ -30,7 +29,6 @@ import {
 import {
   wrapCommandWithSandboxLinux,
   cleanupBwrapMountPoints,
-  unreadableDirectories,
 } from '../../src/sandbox/linux-sandbox-utils.js'
 import {
   DANGEROUS_FILES,
@@ -400,108 +398,25 @@ describe.if(isSupportedPlatform)(
 
       // root reads a directory of any mode.
       it.if(isLinux && process.getuid?.() !== 0)(
-        'takes what ripgrep says it could not read for a hint only',
+        'denies an unreadable owned directory without an external scanner',
         async () => {
-          const project = join(TEST_DIR, 'hints')
-          const outside = join(TEST_DIR, 'hints-outside')
-          for (const directory of [
-            join(project, 'is-readable'),
-            join(project, 'really-locked'),
-            join(project, 'locked: too'),
-            join(project, 'one-thread'),
-            join(project, 'no-prefix'),
-            join(project, 'listed-only/child'),
-            join(project, 'entered-only'),
-            join(project, 'a/b/c/too-deep'),
-            join(outside, 'behind-a-link'),
-          ]) {
-            mkdirSync(directory, { recursive: true })
-          }
-          symlinkSync(outside, join(project, 'link'))
-          const locked = [
-            join(project, 'really-locked'),
-            join(project, 'locked: too'),
-            join(project, 'one-thread'),
-            join(project, 'no-prefix'),
-            join(project, 'a/b/c/too-deep'),
-            join(outside, 'behind-a-link'),
-          ]
-          // What a name in the tree could make ripgrep say.
-          const said = [
-            'is-readable',
-            'really-locked',
-            'a/b/c/too-deep',
-            'link/behind-a-link',
-            '../hints-outside/behind-a-link',
-            'not-there/at-all',
-            'entered-only/not-there',
-            'locked: too',
-            'listed-only/child',
-          ].map(
-            name => `rg: ${project}/${name}: Permission denied (os error 13)`,
-          )
-          said.push(
-            `rg: ${project}/one-thread: IO error for operation on ${project}/one-thread: Permission denied (os error 13)`,
-            `${project}/no-prefix: Permission denied (os error 13)`,
-          )
-          const standIn = join(TEST_DIR, 'says-it-could-not-read')
-          const asked = join(TEST_DIR, 'was-asked')
-          writeFileSync(
-            standIn,
-            [
-              '#!/bin/sh',
-              `printf '%s\\n' "$@" > '${asked}'`,
-              ...said.map(line => `echo '${line}' >&2`),
-              'exit 2',
-            ].join('\n'),
-            { mode: 0o755 },
-          )
+          const project = join(TEST_DIR, 'unreadable-owned-directory')
+          const locked = join(project, 'really-locked')
+          mkdirSync(locked, { recursive: true })
+          writeFileSync(join(locked, '.bashrc'), ORIGINAL_CONTENT)
           process.chdir(project)
-          locked.forEach(directory => chmodSync(directory, 0o000))
-          chmodSync(join(project, 'listed-only'), 0o444)
-          chmodSync(join(project, 'entered-only'), 0o111)
+          chmodSync(locked, 0o000)
           try {
             const wrapped = await wrapCommandWithSandboxLinux({
               command: 'true',
               needsNetworkRestriction: false,
               readConfig: undefined,
               writeConfig: { allowOnly: ['.'], denyWithinAllow: [] },
-              ripgrepConfig: { command: standIn },
             })
 
-            expect(unreadableDirectories(said.join('\n'), project, 3)).toEqual([
-              join(project, 'really-locked'),
-              join(project, 'locked: too'),
-              join(project, 'listed-only'),
-              join(project, 'one-thread'),
-              join(project, 'no-prefix'),
-            ])
-            // Nobody else's mode can be given back from inside.
-            const uid = process.getuid!()
-            const getuid = spyOn(process, 'getuid').mockReturnValue(uid + 1)
-            try {
-              expect(
-                unreadableDirectories(said.join('\n'), project, 3),
-              ).toEqual([])
-            } finally {
-              getuid.mockRestore()
-            }
             expect(wrapped).toContain('really-locked')
-            expect(readFileSync(asked, 'utf8').split('\n')).toEqual(
-              expect.arrayContaining([
-                '--no-ignore',
-                '--no-config',
-                '--line-buffered',
-              ]),
-            )
           } finally {
-            for (const directory of [
-              ...locked,
-              join(project, 'listed-only'),
-              join(project, 'entered-only'),
-            ]) {
-              chmodSync(directory, 0o755)
-            }
+            chmodSync(locked, 0o755)
           }
         },
       )

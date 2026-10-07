@@ -57,6 +57,10 @@ export interface MacOSSandboxParams {
   unsetEnvVars?: string[]
   /** Environment variables to set for the sandboxed child (env NAME=VALUE) */
   setEnvVars?: Record<string, string>
+  /** Clear inherited variables before applying environmentVariables. */
+  clearEnvironment?: boolean
+  /** Exact base environment after clearEnvironment. */
+  environmentVariables?: Record<string, string>
   /**
    * Whole-file credential masks. SBPL cannot redirect reads, so on macOS
    * these degrade to read-deny on realPath until the DYLD interposer
@@ -1363,6 +1367,8 @@ export function wrapCommandWithSandboxMacOS(
     writeConfig,
     unsetEnvVars,
     setEnvVars,
+    clearEnvironment = false,
+    environmentVariables,
     maskedFileBinds,
     degradeToDenyPaths,
     allowPty,
@@ -1403,8 +1409,11 @@ export function wrapCommandWithSandboxMacOS(
     libraryDenyEntries.length > 0
   const hasWriteRestrictions = writeConfig !== undefined
   const hasEnvRestrictions =
+    clearEnvironment ||
     (unsetEnvVars !== undefined && unsetEnvVars.length > 0) ||
-    (setEnvVars !== undefined && Object.keys(setEnvVars).length > 0)
+    (setEnvVars !== undefined && Object.keys(setEnvVars).length > 0) ||
+    (environmentVariables !== undefined &&
+      Object.keys(environmentVariables).length > 0)
   const hasGitConfig = (gitSafeDirectories?.length ?? 0) > 0
 
   // No sandboxing needed
@@ -1516,6 +1525,9 @@ export function wrapCommandWithSandboxMacOS(
   // Masked credentials override the inherited real value with a sentinel.
   // Placed before the proxy plumbing assignments for the same precedence
   // reason as the -u flags.
+  const environmentArgs = Object.entries(environmentVariables ?? {}).map(
+    ([name, value]) => name + '=' + value,
+  )
   const setEnvArgs = Object.entries(setEnvVars ?? {}).map(
     ([name, value]) => `${name}=${value}`,
   )
@@ -1524,7 +1536,9 @@ export function wrapCommandWithSandboxMacOS(
   // argument that quote() escapes properly, avoiding shell quoting issues
   const wrappedCommand = quote([
     'env',
+    ...(clearEnvironment ? ['-i'] : []),
     ...unsetEnvArgs,
+    ...environmentArgs,
     ...setEnvArgs,
     ...proxyEnvArgs,
     '/usr/bin/sandbox-exec',
