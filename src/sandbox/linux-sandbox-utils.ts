@@ -3,11 +3,11 @@ import { logForDebugging } from '../utils/debug.js'
 import { whichSync } from '../utils/which.js'
 import { randomBytes } from 'node:crypto'
 import * as fs from 'fs'
+import type { RipgrepConfig } from '../utils/ripgrep.js'
 import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { endianness, tmpdir } from 'node:os'
 import path, { join } from 'node:path'
-import { ripGrep, RipgrepError, type RipgrepConfig } from '../utils/ripgrep.js'
 import { buildJavaToolOptions } from './java-proxy-agent.js'
 import { readNamesOf, writeNamesOf } from './path-entries.js'
 import {
@@ -63,6 +63,10 @@ export interface LinuxSandboxParams {
   unsetEnvVars?: string[]
   /** Environment variables to set inside the sandbox (bwrap --setenv NAME VALUE) */
   setEnvVars?: Record<string, string>
+  /** Clear inherited variables before applying environmentVariables. */
+  clearEnvironment?: boolean
+  /** Exact base environment after clearEnvironment. */
+  environmentVariables?: Record<string, string>
   /**
    * Whole-file credential masks: bind fakePath (sentinel content) over
    * realPath read-only so the sandbox reads the sentinel.
@@ -76,11 +80,18 @@ export interface LinuxSandboxParams {
   enableWeakerNestedSandbox?: boolean
   allowAllUnixSockets?: boolean
   binShell?: string
-  ripgrepConfig?: RipgrepConfig
   /** Maximum directory depth to search for dangerous files (default: 3) */
+  /** @deprecated The built-in scanner no longer executes ripgrep. */
+  ripgrepConfig?: RipgrepConfig
   mandatoryDenySearchDepth?: number
   /** Allow writes to .git/config files (default: false) */
   allowGitConfig?: boolean
+  /** Explicit host-to-sandbox mounts emitted after filesystem policy mounts. */
+  explicitMounts?: Array<{
+    source: string
+    destination: string
+    mode: 'ro' | 'rw'
+  }>
   /**
    * Directories to emit as `safe.directory` via `GIT_CONFIG_*` env
    * vars (see {@link buildPosixGitSafeDirEnv}). Under `--unshare-user`
@@ -283,8 +294,8 @@ function findFirstNonExistentComponent(targetPath: string): string {
  */
 export function linuxGetCwdMandatoryDenyPaths(
   allowGitConfig = false,
+  cwd = process.cwd(),
 ): string[] {
-  const cwd = process.cwd()
   // Note: Settings files are added at the callsite in sandbox-manager.ts
   const denyPaths = [
     // Dangerous files in CWD
@@ -383,108 +394,66 @@ export function unreadableDirectories(
 }
 
 /**
- * Get mandatory deny paths using ripgrep (Linux only).
- * Uses a SINGLE ripgrep call with multiple glob patterns for efficiency.
- * With --max-depth limiting, this is fast enough to run on each command without memoization.
+ * Find mandatory-deny candidates without depending on an external scanner.
+ * The walk neither follows symlinks nor reads ignore/configuration files, so
+ * an untrusted workspace cannot hide a dangerous path from policy discovery.
  */
-async function linuxGetMandatoryDenyPaths(
-  ripgrepConfig: RipgrepConfig = { command: 'rg' },
+export function linuxGetMandatoryDenyPaths(
   maxDepth: number = DEFAULT_MANDATORY_DENY_SEARCH_DEPTH,
   allowGitConfig = false,
   abortSignal?: AbortSignal,
-): Promise<string[]> {
+): string[] {
   const cwd = process.cwd()
-  // Use provided signal or create a fallback controller
-  const fallbackController = new AbortController()
-  const signal = abortSignal ?? fallbackController.signal
   const dangerousDirectories = getDangerousDirectories()
-
-  const denyPaths = linuxGetCwdMandatoryDenyPaths(allowGitConfig)
-
-  // Build iglob args for all patterns in one ripgrep call
-  const iglobArgs: string[] = []
-  for (const fileName of DANGEROUS_FILES) {
-    iglobArgs.push('--iglob', fileName)
-  }
-  for (const dirName of dangerousDirectories) {
-    iglobArgs.push('--iglob', `**/${dirName}/**`)
-  }
-  // Git hooks always blocked in nested repos. A repository is known by its
-  // HEAD, so that its hooks are denied before there are any.
-  iglobArgs.push('--iglob', '**/.git/hooks/**', '--iglob', '**/.git/HEAD')
-
-  // Git config conditionally blocked in nested repos
-  if (!allowGitConfig) {
-    iglobArgs.push('--iglob', '**/.git/config')
-  }
-
-  // Single ripgrep call to find all dangerous paths in subdirectories
-  // Limit depth for performance - deeply nested dangerous files are rare
-  // and the security benefit doesn't justify the traversal cost
-  //
-  // ripgrep lists files, and its depth is the file's. `sub/.vscode/x` and
-  // `sub/.git/config` lie at `maxDepth`; `sub/.git/hooks/pre-commit`, of the
-  // same directory, one level further down.
-  let matches: string[] = []
-  try {
-    matches = await ripGrep(
-      [
-        '--files',
-        '--hidden',
-        // INVARIANT: no file decides what is listed. An ignore file that names
-        // a directory hides all beneath it, and a configuration file can add
-        // any flag; both are files in or above the tree.
-        '--no-ignore',
-        '--no-config',
-        // Into a pipe ripgrep writes by the block, and killed it drops the
-        // block: it would have listed nothing.
-        '--line-buffered',
-        '--max-depth',
-        String(maxDepth + 1),
-        ...iglobArgs,
-        '-g',
-        '!**/node_modules/**',
-      ],
-      cwd,
-      signal,
-      ripgrepConfig,
-    )
-  } catch (error) {
-    // Stopped, it found nothing: the caller must not be handed a command
-    // without the denies it would have found.
-    signal.throwIfAborted()
-    // INVARIANT: what ripgrep listed counts, however it ended. It exits 2 if
-    // there was a directory it could not read, having listed the rest, and is
-    // killed after ten seconds. What it had not come to by then is not denied.
-    if (error instanceof RipgrepError) {
-      matches = error.listed
-      // A read-only bind also keeps the command from giving the mode back.
-      denyPaths.push(...unreadableDirectories(error.stderr, cwd, maxDepth))
-    }
-    logForDebugging(`[Sandbox] ripgrep scan failed: ${error}`, {
-      level: 'warn',
-    })
-  }
-
-  // The names a match can lie under, by path component.
+  const denyPaths = linuxGetCwdMandatoryDenyPaths(allowGitConfig, cwd)
   const directoryNames = [
     ...dangerousDirectories,
     '.git/hooks',
-    '.git/config',
+    ...(allowGitConfig ? [] : ['.git/config']),
     '.git/HEAD',
   ].map(name => normalizeCaseForComparison(name).split('/'))
+  const matches: string[] = []
+
+  const visit = (dir: string, depth: number): void => {
+    abortSignal?.throwIfAborted()
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EACCES') {
+        try {
+          const stat = fs.lstatSync(dir)
+          if (
+            stat.isDirectory() &&
+            stat.uid === process.getuid?.() &&
+            fs.realpathSync(dir) === dir &&
+            path.relative(cwd, dir).split(path.sep).length <= maxDepth
+          ) {
+            denyPaths.push(dir)
+          }
+        } catch {
+          // An inaccessible or replaced entry cannot safely be made a bind target.
+        }
+      }
+      return
+    }
+
+    for (const entry of entries) {
+      if (entry.name === 'node_modules') continue
+      const candidate = path.join(dir, entry.name)
+      if (entry.isSymbolicLink()) continue
+      matches.push(candidate)
+      if (entry.isDirectory() && depth < maxDepth + 1)
+        visit(candidate, depth + 1)
+    }
+  }
+
+  visit(cwd, 0)
   for (const match of matches) {
-    const segments = path
-      .relative(cwd, path.resolve(cwd, match))
-      .split(path.sep)
+    const segments = path.relative(cwd, match).split(path.sep)
     const lower = segments.map(normalizeCaseForComparison)
-    // Where the dangerous name begins and how long it is: the first of
-    // `directoryNames` on the way down, else the file itself.
-    let at = segments.length - 1
-    let length = 1
-    // How deep the directory holding the name, `at`, may lie. One level less
-    // for `directoryNames`, all alike: each costs mounts that keep what holds
-    // it from being renamed or removed, and bwrap's start grows with them.
+    let at = -1
+    let length = 0
     let deepest = maxDepth - 1
     search: for (let i = 0; i < lower.length; i++) {
       for (const name of directoryNames) {
@@ -495,8 +464,15 @@ async function linuxGetMandatoryDenyPaths(
           break search
         }
       }
+      if (
+        DANGEROUS_FILES.includes(lower[i] as (typeof DANGEROUS_FILES)[number])
+      ) {
+        at = i
+        length = 1
+        break search
+      }
     }
-    if (at > deepest) continue
+    if (at < 0 || at > deepest) continue
     const found = segments.slice(0, at + length)
     if (lower[at] === '.git' && lower[at + 1] === 'head')
       found[at + 1] = 'hooks'
@@ -1883,7 +1859,7 @@ async function generateFilesystemArgs(
   writeConfig: FsWriteRestrictionConfig | undefined,
   maskedFileBinds: Array<{ realPath: string; fakePath: string }> | undefined,
   maskedFileStoreDir: string | undefined,
-  ripgrepConfig: RipgrepConfig = { command: 'rg' },
+  _ripgrepConfig: RipgrepConfig = { command: 'rg' },
   mandatoryDenySearchDepth: number = DEFAULT_MANDATORY_DENY_SEARCH_DEPTH,
   allowGitConfig = false,
   abortSignal?: AbortSignal,
@@ -2354,12 +2330,11 @@ async function generateFilesystemArgs(
     // Deny writes within allowed paths (user-specified + mandatory denies)
     const denyPaths = [
       ...(writeConfig.denyWithinAllow || []),
-      ...(await linuxGetMandatoryDenyPaths(
-        ripgrepConfig,
+      ...linuxGetMandatoryDenyPaths(
         mandatoryDenySearchDepth,
         allowGitConfig,
         abortSignal,
-      )),
+      ),
     ]
     // INVARIANT: one plan, one working directory. A relative entry is resolved
     // against it on both sides of the await above, the only one here.
@@ -3229,14 +3204,17 @@ export async function wrapCommandWithSandboxLinux(
     javaAgentJarPath,
     unsetEnvVars,
     setEnvVars,
+    clearEnvironment = false,
+    environmentVariables,
+    ripgrepConfig = { command: 'rg' },
     maskedFileBinds,
     maskedFileStoreDir,
     enableWeakerNestedSandbox,
     allowAllUnixSockets,
     binShell,
-    ripgrepConfig = { command: 'rg' },
     mandatoryDenySearchDepth = DEFAULT_MANDATORY_DENY_SEARCH_DEPTH,
     allowGitConfig = false,
+    explicitMounts,
     gitSafeDirectories,
     seccompConfig,
     bwrapPath,
@@ -3259,8 +3237,11 @@ export async function wrapCommandWithSandboxLinux(
     (maskedFileBinds !== undefined && maskedFileBinds.length > 0)
   const hasWriteRestrictions = writeConfig !== undefined
   const hasEnvRestrictions =
+    clearEnvironment ||
     (unsetEnvVars !== undefined && unsetEnvVars.length > 0) ||
-    (setEnvVars !== undefined && Object.keys(setEnvVars).length > 0)
+    (setEnvVars !== undefined && Object.keys(setEnvVars).length > 0) ||
+    (environmentVariables !== undefined &&
+      Object.keys(environmentVariables).length > 0)
   const hasGitConfig = (gitSafeDirectories?.length ?? 0) > 0
 
   // Check if we need any sandboxing
@@ -3344,6 +3325,10 @@ export async function wrapCommandWithSandboxLinux(
     // argument order, so SRT's own proxy plumbing vars survive even if a
     // caller lists one of them as a denied credential.
     if (hasEnvRestrictions) {
+      if (clearEnvironment) bwrapArgs.push('--clearenv')
+      for (const [name, value] of Object.entries(environmentVariables ?? {})) {
+        bwrapArgs.push('--setenv', name, value)
+      }
       for (const name of unsetEnvVars ?? []) {
         bwrapArgs.push('--unsetenv', name)
       }
@@ -3470,6 +3455,13 @@ export async function wrapCommandWithSandboxLinux(
     )
     const mountsStart = bwrapArgs.length
     bwrapArgs.push(...fsArgs)
+    for (const mount of explicitMounts ?? []) {
+      bwrapArgs.push(
+        mount.mode === 'ro' ? '--ro-bind' : '--bind',
+        mount.source,
+        mount.destination,
+      )
+    }
     const mounts = { start: mountsStart, end: bwrapArgs.length }
 
     // Always bind /dev

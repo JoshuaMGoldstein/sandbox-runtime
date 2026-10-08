@@ -10,6 +10,7 @@ export type {
   FilesystemConfig,
   FilesystemPathEntry,
   CredentialsConfig,
+  EnvironmentConfig,
   CredentialFileConfig,
   CredentialEnvVarConfig,
   CredentialMode,
@@ -21,6 +22,7 @@ export {
   NetworkConfigSchema,
   FilesystemConfigSchema,
   CredentialsConfigSchema,
+  EnvironmentConfigSchema,
   IgnoreViolationsConfigSchema,
   RipgrepConfigSchema,
 } from './sandbox/sandbox-config.js'

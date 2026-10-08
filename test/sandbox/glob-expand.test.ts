@@ -2060,39 +2060,31 @@ describe.if(isLinux)('getFsReadConfig with glob patterns on Linux', () => {
     },
   )
 
-  it('wraps from one working directory when the host changes it while the mandatory denies are looked for', async () => {
+  it('snapshots the working directory before mandatory-deny discovery', async () => {
     const { SandboxManager } = await import(
       '../../src/sandbox/sandbox-manager.js'
     )
     const root = realPath(mkdtempSync(join(tmpdir(), 'glob-walk-scan-cd-')))
-    mkdirSync(join(root, 'from'))
-    mkdirSync(join(root, 'to'))
-    // Stands in for ripgrep: says that it ran, finds nothing, and takes long
-    // enough for the host to move meanwhile.
-    const scans = join(root, 'scans')
-    const slowScan = join(root, 'slow-scan')
-    writeFileSync(slowScan, `#!/bin/sh\necho ran >> ${scans}\nsleep 0.4\n`, {
-      mode: 0o755,
-    })
+    const from = join(root, 'from')
+    const to = join(root, 'to')
+    mkdirSync(from)
+    mkdirSync(to)
+    writeFileSync(join(from, '.bashrc'), 'dangerous')
+    writeFileSync(join(to, '.zshrc'), 'dangerous')
     const cwd = process.cwd()
-    process.chdir(join(root, 'from'))
+    process.chdir(from)
 
     await SandboxManager.reset()
     await SandboxManager.initialize({
       network: { allowedDomains: [], deniedDomains: [] },
       filesystem: { denyRead: [], allowWrite: ['.'], denyWrite: [] },
-      ripgrep: { command: slowScan },
     })
-    const moving = setTimeout(() => process.chdir(join(root, 'to')), 150)
     try {
-      const disturbed = await SandboxManager.wrapWithSandbox('true')
+      const wrapped = await SandboxManager.wrapWithSandbox('true')
 
-      expect(fs.readFileSync(scans, 'utf8')).toBe('ran\nran\n')
-      expect(disturbed).toBe(await SandboxManager.wrapWithSandbox('true'))
-      expect(disturbed).toContain(join(root, 'to'))
-      expect(disturbed).not.toContain(join(root, 'from'))
+      expect(wrapped).toContain(join(from, '.bashrc'))
+      expect(wrapped).not.toContain(join(to, '.zshrc'))
     } finally {
-      clearTimeout(moving)
       process.chdir(cwd)
       await SandboxManager.reset()
       rmSync(root, { recursive: true, force: true })
@@ -2211,24 +2203,21 @@ describe.if(isLinux)('getFsReadConfig with glob patterns on Linux', () => {
     }
   })
 
-  it('gives up a wrap whose signal is aborted while the mandatory denies are looked for', async () => {
+  it('rejects an already-aborted signal before mandatory-deny discovery', async () => {
     const { SandboxManager } = await import(
       '../../src/sandbox/sandbox-manager.js'
     )
     const root = realPath(mkdtempSync(join(tmpdir(), 'glob-walk-scan-')))
-    // Stands in for ripgrep, and outlasts the abort.
-    const slowScan = join(root, 'slow-scan')
-    writeFileSync(slowScan, '#!/bin/sh\nsleep 5\n', { mode: 0o755 })
+    writeFileSync(join(root, '.bashrc'), 'dangerous')
 
     await SandboxManager.reset()
     await SandboxManager.initialize({
       network: { allowedDomains: [], deniedDomains: [] },
       filesystem: { denyRead: [], allowWrite: [root], denyWrite: [] },
-      ripgrep: { command: slowScan },
     })
     const controller = new AbortController()
     const reason = new Error('stopped')
-    setTimeout(() => controller.abort(reason), 200)
+    controller.abort(reason)
     try {
       expect(
         await SandboxManager.wrapWithSandbox(
@@ -2236,7 +2225,7 @@ describe.if(isLinux)('getFsReadConfig with glob patterns on Linux', () => {
           undefined,
           undefined,
           controller.signal,
-        ).catch((e: unknown) => e),
+        ).catch((error: unknown) => error),
       ).toBe(reason)
     } finally {
       await SandboxManager.reset()

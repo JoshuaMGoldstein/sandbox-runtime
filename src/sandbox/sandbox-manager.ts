@@ -35,9 +35,8 @@ import {
   type MitmCA,
 } from './mitm-ca.js'
 import { logForDebugging } from '../utils/debug.js'
-import { whichSync } from '../utils/which.js'
-import type { RipgrepConfig } from '../utils/ripgrep.js'
 import { getPlatform, getWslVersion } from '../utils/platform.js'
+import type { RipgrepConfig } from '../utils/ripgrep.js'
 import * as fs from 'fs'
 import { randomBytes } from 'node:crypto'
 import type {
@@ -949,6 +948,10 @@ async function initialize(
     }
   }
 
+  // An air-gapped sandbox needs only its per-command network namespace. It
+  // must not start host proxy infrastructure that would later be bind-mounted.
+  if (config.network.airGapped) return
+
   // Initialize network infrastructure
   initializationPromise = (async () => {
     try {
@@ -1061,7 +1064,7 @@ function isSandboxingEnabled(): boolean {
  * the only platform where the sync and async variants differ.
  */
 function checkDependenciesCommon(
-  ripgrepConfig?: RipgrepConfig,
+  _ripgrepConfig?: RipgrepConfig,
 ):
   | { done: SandboxDependencyCheck }
   | { windows: { sublayerGuid?: string; srtWin: SrtWinSpawn } } {
@@ -1074,14 +1077,6 @@ function checkDependenciesCommon(
 
   const platform = getPlatform()
   if (platform === 'linux') {
-    // ripgrep is Linux-only: it's used by linuxGetMandatoryDenyPaths() to
-    // expand glob deny-patterns to concrete paths for bwrap. macOS seatbelt
-    // profiles take regex patterns directly, so rg is never invoked there.
-    const rgToCheck = ripgrepConfig ?? config?.ripgrep ?? { command: 'rg' }
-    if (whichSync(rgToCheck.command) === null) {
-      errors.push(`ripgrep (${rgToCheck.command}) not found`)
-    }
-
     const linuxDeps = checkLinuxDependencies({
       seccompConfig: config?.seccomp,
       bwrapPath: config?.bwrapPath,
@@ -1111,7 +1106,6 @@ function checkDependenciesCommon(
 
 /**
  * Check sandbox dependencies for the current platform
- * @param ripgrepConfig - Ripgrep command to check. If not provided, uses config from initialization or defaults to 'rg'
  * @returns { warnings, errors } - errors mean sandbox cannot run, warnings mean degraded functionality
  */
 function checkDependencies(
@@ -1619,10 +1613,6 @@ function getAllowAppleEvents(): boolean | undefined {
   return config?.allowAppleEvents
 }
 
-function getRipgrepConfig(): RipgrepConfig {
-  return config?.ripgrep ?? { command: 'rg' }
-}
-
 function getMandatoryDenySearchDepth(): number {
   return config?.mandatoryDenySearchDepth ?? 3
 }
@@ -1923,11 +1913,12 @@ async function wrapWithSandboxAgain(
   // This includes empty allowedDomains which means "block all network"
   const needsNetworkRestriction = hasNetworkConfig
 
-  // Network PROXY is needed whenever network config is specified
-  // Even with empty allowedDomains, we route through proxy so that:
-  // 1. updateConfig() can enable network access for already-running processes
-  // 2. The proxy blocks all requests when allowlist is empty
-  const needsNetworkProxy = hasNetworkConfig
+  // Network PROXY is normally needed whenever network config is specified,
+  // including an empty allowlist so updateConfig() can enable access later.
+  // airGapped is the immutable exception: it retains --unshare-net but has no
+  // bridge, proxy process, socket mount, or proxy environment injection.
+  const needsNetworkProxy =
+    hasNetworkConfig && !customConfig?.network?.airGapped
 
   // Wait for network initialization only if proxy is actually needed
   if (needsNetworkProxy) {
@@ -1962,6 +1953,7 @@ async function wrapWithSandboxAgain(
 
   // Check custom config to allow pseudo-terminal (can be applied dynamically)
   const allowPty = customConfig?.allowPty ?? config?.allowPty
+  const environment = customConfig?.environment ?? config?.environment
 
   const gitSafeDirectories = getGitSafeDirectories(customConfig)
 
@@ -1982,6 +1974,8 @@ async function wrapWithSandboxAgain(
         writeConfig,
         unsetEnvVars: credentialRestrictions.unsetEnvVars,
         setEnvVars: credentialRestrictions.setEnvVars,
+        clearEnvironment: environment?.clear ?? false,
+        environmentVariables: environment?.variables,
         maskedFileBinds: credentialRestrictions.maskedFileBinds,
         degradeToDenyPaths: credentialRestrictions.degradeToDenyPaths,
         allowUnixSockets: getAllowUnixSockets(),
@@ -2022,14 +2016,16 @@ async function wrapWithSandboxAgain(
         writeConfig,
         unsetEnvVars: credentialRestrictions.unsetEnvVars,
         setEnvVars: credentialRestrictions.setEnvVars,
+        clearEnvironment: environment?.clear ?? false,
+        environmentVariables: environment?.variables,
         maskedFileBinds: credentialRestrictions.maskedFileBinds,
         maskedFileStoreDir: credentialRestrictions.maskedFileStoreDir,
         enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(),
         allowAllUnixSockets: getAllowAllUnixSockets(),
         binShell,
-        ripgrepConfig: getRipgrepConfig(),
         mandatoryDenySearchDepth: getMandatoryDenySearchDepth(),
         allowGitConfig: getAllowGitConfig(),
+        explicitMounts: config?.filesystem.explicitMounts,
         gitSafeDirectories,
         seccompConfig: getSeccompConfig(),
         bwrapPath: config?.bwrapPath,
@@ -2096,7 +2092,9 @@ async function wrapWithSandboxArgv(
     const hasNetworkConfig =
       customConfig?.network?.allowedDomains !== undefined ||
       config?.network?.allowedDomains !== undefined
-    if (hasNetworkConfig) {
+    const needsNetworkProxy =
+      hasNetworkConfig && !customConfig?.network?.airGapped
+    if (needsNetworkProxy) {
       await waitForNetworkInitialization()
     }
     const credentialRestrictions = getCredentialRestrictions(
@@ -2167,9 +2165,9 @@ async function wrapWithSandboxArgv(
     return wrapCommandWithSandboxWindows({
       command,
       commandId: options?.commandId,
-      httpProxyPort: hasNetworkConfig ? getProxyPort() : undefined,
-      socksProxyPort: hasNetworkConfig ? getSocksProxyPort() : undefined,
-      proxyAuthToken: hasNetworkConfig ? proxyAuthToken : undefined,
+      httpProxyPort: needsNetworkProxy ? getProxyPort() : undefined,
+      socksProxyPort: needsNetworkProxy ? getSocksProxyPort() : undefined,
+      proxyAuthToken: needsNetworkProxy ? proxyAuthToken : undefined,
       // mode:'deny' env vars are structurally absent (fresh
       // srt-sandbox profile env). mode:'mask' sentinels are
       // passed via the --env overlay so the sandboxed child sees
@@ -2208,7 +2206,9 @@ async function wrapWithSandboxArgv(
     options,
   )
   const shell = binShell ?? '/bin/bash'
-  return { argv: [shell, '-c', wrapped], env: process.env }
+  const environment = customConfig?.environment ?? config?.environment
+  const env = environment?.clear ? { ...environment.variables } : process.env
+  return { argv: [shell, '-c', wrapped], env }
 }
 
 /**

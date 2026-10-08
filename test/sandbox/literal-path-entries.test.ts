@@ -1539,12 +1539,21 @@ describe.if(!isWindows)(
     })
 
     it('compiles an entry as before when none of it is a name on disk', () => {
+      const absentRoot = '/definitely-not-a-real-srt-path'
       const profile = macProfile(
-        { denyOnly: ['/srv/[ab]/secrets', '/srv/**/.env'] },
-        { allowOnly: ['/srv/build*'], denyWithinAllow: ['/srv/*.lock'] },
+        {
+          denyOnly: [
+            join(absentRoot, '[ab]', 'secrets'),
+            join(absentRoot, '**', '.env'),
+          ],
+        },
+        {
+          allowOnly: [join(absentRoot, 'build*')],
+          denyWithinAllow: [join(absentRoot, '*.lock')],
+        },
       )
       expect(
-        emittedSubpaths(profile).filter(p => p.startsWith('/srv')),
+        emittedSubpaths(profile).filter(p => p.startsWith(absentRoot)),
       ).toEqual([])
     })
   },

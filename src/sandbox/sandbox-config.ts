@@ -766,6 +766,12 @@ export const NetworkConfigSchema = z.object({
     .describe(
       'If true, hosts not in allowedDomains are denied without consulting the ask callback. Set this when allowedDomains is policy enforcement, not a prompt-suppression hint.',
     ),
+  airGapped: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true, create an isolated network namespace without starting or binding any proxy bridge. This is stronger than an empty allowlist, which preserves a proxy for later policy updates.',
+    ),
   deniedResolvedAddresses: z
     .array(addressRangeSchema)
     .optional()
@@ -912,6 +918,30 @@ export const NetworkConfigSchema = z.object({
   ),
 })
 
+const absoluteNormalizedMountPathSchema = z
+  .string()
+  .refine(
+    value =>
+      posixPath.isAbsolute(value) && posixPath.normalize(value) === value,
+    'Mount paths must be absolute and normalized',
+  )
+  .refine(
+    value => !value.includes('\0'),
+    'Mount paths must not contain NUL bytes',
+  )
+
+const explicitMountSchema = z
+  .object({
+    source: absoluteNormalizedMountPathSchema.describe(
+      'Absolute normalized host path to mount.',
+    ),
+    destination: absoluteNormalizedMountPathSchema.describe(
+      'Absolute normalized path inside the Linux sandbox.',
+    ),
+    mode: z.enum(['ro', 'rw']).describe('Read-only or read-write mount mode.'),
+  })
+  .strict()
+
 /**
  * Filesystem configuration schema for validation
  */
@@ -949,6 +979,12 @@ export const FilesystemConfigSchema = z.object({
     .describe(
       'Allow writes to .git/config files (default: false). Enables git remote URL updates while keeping .git/hooks protected.',
     ),
+  explicitMounts: z
+    .array(explicitMountSchema)
+    .optional()
+    .describe(
+      'Linux-only explicit host-to-sandbox bind mounts emitted after filesystem policy mounts.',
+    ),
 })
 
 /**
@@ -964,6 +1000,38 @@ export const IgnoreViolationsConfigSchema = z
 /**
  * Ripgrep configuration schema
  */
+/**
+ * Exact child environment for embedders that cannot permit ambient host
+ * variables to reach sandboxed commands. This deliberately has no inherit
+ * mode: either the caller clears first and supplies every value, or SRT keeps
+ * its existing compatibility behavior.
+ */
+const environmentVariableNameSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    'Environment variable names must be shell-safe identifiers',
+  )
+
+const environmentVariableValueSchema = z
+  .string()
+  .refine(
+    value => !value.includes('\0'),
+    'Environment variable values must not contain NUL bytes',
+  )
+
+export const EnvironmentConfigSchema = z
+  .object({
+    clear: z
+      .literal(true)
+      .describe('Clear the inherited environment before applying variables'),
+    variables: z
+      .record(environmentVariableNameSchema, environmentVariableValueSchema)
+      .default({})
+      .describe('The complete environment visible to the sandboxed child'),
+  })
+  .strict()
+
 export const RipgrepConfigSchema = z.object({
   command: z.string().describe('The ripgrep command to execute'),
   args: z
@@ -1143,6 +1211,9 @@ export const SandboxRuntimeConfigSchema = z
       'Credential handling configuration. Only the explicitly declared files ' +
         'and environment variables are restricted.',
     ),
+    environment: EnvironmentConfigSchema.optional().describe(
+      'Optional exact child environment. When set, inherited host environment variables are cleared before these values are applied.',
+    ),
     ignoreViolations: IgnoreViolationsConfigSchema.optional().describe(
       'Optional configuration for ignoring specific violations',
     ),
@@ -1222,6 +1293,34 @@ export const SandboxRuntimeConfigSchema = z
     ),
   })
   .superRefine((cfg, ctx) => {
+    if (cfg.network.airGapped && cfg.network.allowedDomains.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['network', 'allowedDomains'],
+        message: 'network.airGapped requires an empty allowedDomains list',
+      })
+    }
+
+    const mounts = cfg.filesystem.explicitMounts ?? []
+    for (let index = 0; index < mounts.length; index++) {
+      const mount = mounts[index]!
+      if (
+        mounts.some(
+          (other, otherIndex) =>
+            otherIndex !== index &&
+            (other.destination === mount.destination ||
+              other.destination.startsWith(mount.destination + '/') ||
+              mount.destination.startsWith(other.destination + '/')),
+        )
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['filesystem', 'explicitMounts', index, 'destination'],
+          message: 'Mount destinations must not overlap',
+        })
+      }
+    }
+
     // filesystem.disabled drops every filesystem rule, the credential file
     // denies included (getFsReadConfig, getFsWriteConfig and
     // computeWindowsFsAccessSet all short-circuit on it), so an inert deny
@@ -1503,6 +1602,7 @@ export type CredentialEnvVarConfig = z.infer<
   typeof CredentialEnvVarConfigSchema
 >
 export type CredentialsConfig = z.infer<typeof CredentialsConfigSchema>
+export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>
 export type AwsPairConfig = z.infer<typeof AwsPairConfigSchema>
 export type Sigv4Config = z.infer<typeof Sigv4ConfigSchema>
 export type IgnoreViolationsConfig = z.infer<
