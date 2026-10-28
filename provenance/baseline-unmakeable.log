@@ -1,0 +1,73 @@
+bun test v1.3.14 (0d9b296a)
+
+test/sandbox/linux-unmakeable-mount-point.test.ts:
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is writable [86.88ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is writable, and of another [8.17ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is unwritable by its mode, and of this user [10.96ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is unwritable by its mode, and of another [10.91ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is on a read-only file system, and of this user [8.51ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is on a read-only file system, and of another [7.71ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is immutable, and of this user [8.33ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is failing to answer, and of another [9.36ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > keeps a parent that takes no mount point from being moved aside [19.09ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > takes nothing that turns up at the path for its own [7.26ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > asks for write and search together [6.59ms]
+(pass) A placeholder where no mount point can be made > on any doubt > leaves it out when there is none [7.08ms]
+(pass) A placeholder where no mount point can be made > on any doubt > plans it when the parent cannot be opened [6.67ms]
+(pass) A placeholder where no mount point can be made > on any doubt > plans it when /proc does not say where the descriptor leads [6.81ms]
+(pass) A placeholder where no mount point can be made > on any doubt > plans it when the file system cannot be told [6.43ms]
+(pass) A placeholder where no mount point can be made > on any doubt > closes the descriptor whatever the answer [14.65ms]
+(pass) A placeholder where no mount point can be made > with the parent swapped under the wrap > plans the placeholder when the parent is a symlink as it is opened [7.94ms]
+(pass) A placeholder where no mount point can be made > with the parent swapped under the wrap > plans it when a directory above the parent is a symlink as it is opened [7.60ms]
+(pass) A placeholder where no mount point can be made > with the parent swapped under the wrap > plans it when the parent is swapped once it is open [7.21ms]
+(pass) A placeholder where no mount point can be made > asks everything of one descriptor on the parent, off a Windows drive [7.44ms]
+(pass) A placeholder where no mount point can be made > asks everything of one descriptor on the parent, on a Windows drive [7.26ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > makes the mount point itself, and the clean-up removes it [9.11ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > covers a file with a directory in a folder that takes subfolders and no files [8.84ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > leaves a file out in a folder that takes nothing and is beyond this user [9.11ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > leaves a directory out in a folder that takes nothing and is beyond this user [8.47ms]
+485 | 
+486 |       expect(mountsAt(command, denied)).toEqual([
+487 |         `--ro-bind /dev/null ${denied}`,
+488 |       ])
+489 |       // The mode it has, so that nothing changes.
+490 |       expect(modes).toEqual([0o2750])
+                          ^
+error: expect(received).toEqual(expected)
+
+  [
+-   1512,
++   488,
+  ]
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/srv/sandbox-runtime/.baseline-081/test/sandbox/linux-unmakeable-mount-point.test.ts:490:21)
+(fail) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans the kind asked for when the name is refused in a folder this user governs [9.42ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans it, and tries nothing, where access() refuses a folder this user governs [8.64ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > leaves it out, and tries nothing, where access() refuses a folder this user does not govern [7.32ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > tries no file where a directory is wanted [8.44ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans it, and takes nothing for its own, when the path is there by the time it is tried [7.71ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a missing folder > plans one directory, as listed [7.13ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a missing folder > plans one directory, reversed [7.00ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a path and one beneath it > plans one directory, as listed [8.15ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a path and one beneath it > plans one directory, reversed [7.08ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > removes what it made when the wrap then fails [9.04ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > runs on the mount points it made, and the paths cannot be created [17.42ms]
+(pass) A placeholder where no mount point can be made > asks nothing of the host for a path that needs no placeholder [8.21ms]
+(pass) A placeholder where no mount point can be made > asks once for deny paths that share a missing directory [8.04ms]
+(pass) A placeholder where no mount point can be made > in directories of another user > plans no placeholder, and keeps their top-level directories mount points [9.55ms]
+(pass) A placeholder where no mount point can be made > in directories of another user > starts with "/" allowed, and the paths cannot be created [35.10ms]
+(pass) A placeholder where no mount point can be made > in directories of another user > starts with the directories themselves allowed, and the paths cannot be created [18.30ms]
+(pass) A placeholder where no mount point can be made > in a directory of this user that its mode closes > plans the placeholder [7.60ms]
+(pass) A placeholder where no mount point can be made > in a directory of this user that its mode closes > holds the path against a command that opens the directory [16.31ms]
+(pass) A placeholder where no mount point can be made > starts with an absent deny path on a read-only file system [126.31ms]
+
+1 tests failed:
+(fail) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans the kind asked for when the name is refused in a folder this user governs [9.42ms]
+
+ 43 pass
+ 1 fail
+ 117 expect() calls
+Ran 44 tests across 1 file. [707.00ms]

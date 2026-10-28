@@ -65,6 +65,8 @@ export interface LinuxSandboxParams {
   /** Environment variable names to unset inside the sandbox (bwrap --unsetenv) */
   unsetEnvVars?: string[]
   /** Environment variables to set inside the sandbox (bwrap --setenv NAME VALUE) */
+  clearEnvironment?: boolean
+  environmentVariables?: Record<string, string>
   setEnvVars?: Record<string, string>
   /**
    * Whole-file credential masks: bind fakePath (sentinel content) over
@@ -3551,6 +3553,8 @@ export async function wrapCommandWithSandboxLinux(
     javaAgentJarPath,
     unsetEnvVars,
     setEnvVars,
+    clearEnvironment = false,
+    environmentVariables,
     maskedFileBinds,
     maskedFileStoreDir,
     enableWeakerNestedSandbox,
@@ -3583,6 +3587,8 @@ export async function wrapCommandWithSandboxLinux(
     (maskedFileBinds !== undefined && maskedFileBinds.length > 0)
   const hasWriteRestrictions = writeConfig !== undefined
   const hasEnvRestrictions =
+    clearEnvironment ||
+    Object.keys(environmentVariables ?? {}).length > 0 ||
     (unsetEnvVars !== undefined && unsetEnvVars.length > 0) ||
     (setEnvVars !== undefined && Object.keys(setEnvVars).length > 0)
   const hasGitConfig = (gitSafeDirectories?.length ?? 0) > 0
@@ -3593,7 +3599,8 @@ export async function wrapCommandWithSandboxLinux(
     !hasReadRestrictions &&
     !hasWriteRestrictions &&
     !hasEnvRestrictions &&
-    !hasGitConfig
+    !hasGitConfig &&
+    !explicitMounts?.length
   ) {
     return command
   }
@@ -3672,6 +3679,10 @@ export async function wrapCommandWithSandboxLinux(
     // argument order, so SRT's own proxy plumbing vars survive even if a
     // caller lists one of them as a denied credential.
     if (hasEnvRestrictions) {
+      if (clearEnvironment) bwrapArgs.push('--clearenv')
+      for (const [name, value] of Object.entries(environmentVariables ?? {})) {
+        bwrapArgs.push('--setenv', name, value)
+      }
       for (const name of unsetEnvVars ?? []) {
         bwrapArgs.push('--unsetenv', name)
       }
@@ -3691,6 +3702,9 @@ export async function wrapCommandWithSandboxLinux(
     if (gitSafeDirectories && gitSafeDirectories.length > 0) {
       const gitCfg = buildPosixGitSafeDirEnv({
         safeDirs: gitSafeDirectories,
+        inherited: clearEnvironment
+          ? (environmentVariables ?? {})
+          : process.env,
         unsetEnvVars,
         setEnvVars,
       })

@@ -1,0 +1,144 @@
+bun test v1.3.14 (0d9b296a)
+
+test/sandbox/linux-bwrap-args-file.test.ts:
+(pass) the bwrap profile error at the package root > carries a name, a code, and a cause only when one is given [0.11ms]
+(pass) bwrap --args for over-long profiles > keeps a profile that fits on the command line, and names no file for it [88.41ms]
+(pass) bwrap --args for over-long profiles > moves the mounts, and only the mounts, to an unnamed file the string reopens through /proc [86.43ms]
+(pass) bwrap --args for over-long profiles > switches to the file exactly where one argument would come within 4 KiB of the cap [24.19ms]
+(pass) bwrap --args for over-long profiles > refuses a command that is too long for one argument by itself [10.91ms]
+(pass) bwrap --args for over-long profiles > reaches the same refusal through SandboxManager, the way an embedder wraps [133.01ms]
+(pass) bwrap --args for over-long profiles > refuses a profile past the 9000 arguments bwrap accepts [9.18ms]
+(pass) bwrap --args for over-long profiles > refuses an over-long profile whose mounts, passed through a file, would pass the 9000 arguments [18.04ms]
+(pass) bwrap --args for over-long profiles > tells the arguments of the mandatory denies from those of the configuration [69.38ms]
+(pass) bwrap --args for over-long profiles > refuses a mount path with a NUL byte whether or not the profile fits the command line [75.94ms]
+(pass) bwrap --args for over-long profiles > holds one fd per pending profile and gives them all back at cleanup, a refused wrap included [246.89ms]
+(pass) bwrap --args for over-long profiles > refuses at wrap time, with the reason, when no directory takes an unnamed file [225.89ms]
+(pass) bwrap --args for over-long profiles > fails in the redirection, and does not run the command, when the string is run after its cleanup [68.27ms]
+(pass) bwrap --args for over-long profiles > e2e: a pending profile survives a tmpdir whose parent is replaced, because no path leads to it [781.25ms]
+(pass) bwrap --args for over-long profiles > e2e: bwrap applies the mounts from the file, the string composes with a prefix and a suffix, and the command reaches neither fd 9 nor the profile [659.42ms]
+
+test/sandbox/explicit-mounts.test.ts:
+(pass) explicit mounts > preserves normalized mounts [2.34ms]
+(pass) explicit mounts > rejects relative, non-normalized, NUL, duplicate and overlapping destinations [1.69ms]
+(pass) explicit mounts > emits ro/rw binds after policy masks and before sandbox devices [8.32ms]
+(pass) explicit mounts > forwards the session plan through the manager [117.00ms]
+
+test/sandbox/linux-mount-plan-record.test.ts:
+(pass) Linux sandbox — mount-plan record and ordering > preserves a carve-out under a denyRead dir when the inner deny mounts later [9.04ms]
+(pass) Linux sandbox — mount-plan record and ordering > restores a write root under a denyRead directory in whichever order a symlink-spelled entry inside it is listed [15.89ms]
+(pass) Linux sandbox — mount-plan record and ordering > emits a deny bind whose region a later unit re-exposed [8.86ms]
+(pass) Linux sandbox — mount-plan record and ordering > resolves a symlink-spelled denyRead directory after the mandatory-deny scan, not before it [5.83ms]
+(pass) Linux sandbox — mount-plan record and ordering > masks a symlink-spelled file where it resolves, and drops the denyWrite bind naming that location [8.21ms]
+(pass) Linux sandbox — mount-plan record and ordering > emits a deny bind whose raw route is buried but whose canonical location is exposed [9.67ms]
+(pass) Linux sandbox — mount-plan record and ordering > pins the canonical parents of a symlink-spelled denyRead file mask beneath the mask, which is emitted once [8.39ms]
+(pass) Linux sandbox — mount-plan record and ordering > restores an allowRead carve-out spelled through a symlink whose target lies inside the denied directory [8.92ms]
+(pass) Linux sandbox — mount-plan record and ordering > restores an allowRead carve-out spelled through a symlink whose target lies inside the denied directory (live bwrap) [19.64ms]
+(pass) Linux sandbox — mount-plan record and ordering > emits one mount for a symlinked entry whose target an earlier tmpfs already hides [9.34ms]
+(pass) Linux sandbox — mount-plan record and ordering > spells a read-deny mount by where it lands once an earlier tmpfs has hidden its symlink target (live bwrap) [20.38ms]
+(pass) Linux sandbox — mount-plan record and ordering > restores an allowRead carve-out under a denied directory reached through a symlinked parent [11.34ms]
+(pass) Linux sandbox — mount-plan record and ordering > restores an allowRead carve-out under a denied directory reached through a symlinked parent (live bwrap) [21.10ms]
+(pass) Linux sandbox — mount-plan record and ordering > does not bind an allowRead symlink whose target lies outside the denied directory [8.46ms]
+(pass) Linux sandbox — mount-plan record and ordering > does not restore an allowRead entry that is a symlink into a read-denied directory [8.58ms]
+(pass) Linux sandbox — mount-plan record and ordering > does not restore an allowRead entry that is a symlink into a read-denied directory (live bwrap) [18.16ms]
+(pass) Linux sandbox — mount-plan record and ordering > does not restore a file inside a read-denied directory through a symlink planted outside it [8.95ms]
+(pass) Linux sandbox — mount-plan record and ordering > keeps a file mask when the allowRead entry is a symlink to the file, even one the deny list names too [14.06ms]
+(pass) Linux sandbox — mount-plan record and ordering > still lifts a file mask for an allowRead entry naming that file through a symlinked directory [7.58ms]
+(pass) Linux sandbox — mount-plan record and ordering > still hides a root child under a root deny when an allowRead entry is a symlink to it [8.41ms]
+(pass) Linux sandbox — mount-plan record and ordering > denies the target of a read-deny symlink whose route an earlier tmpfs hid, and drops the write deny the tmpfs covers [9.02ms]
+(pass) Linux sandbox — mount-plan record and ordering > masks the target of a read-deny file symlink whose route an earlier tmpfs hid [8.59ms]
+(pass) Linux sandbox — mount-plan record and ordering > seeds pins from a read-denied directory [8.08ms]
+(pass) Linux sandbox — mount-plan record and ordering > re-applies an allowRead carve-out that contains a deeper read-deny, then the deeper deny [9.03ms]
+(pass) Linux sandbox — mount-plan record and ordering > denies beneath a writable root, and pins above its bind under one writable cover [7.52ms]
+(pass) Linux sandbox — mount-plan record and ordering > stubs no absent path after a read-only root when the root is both allowed and denied [8.24ms]
+
+test/sandbox/zmux-compat.test.ts:
+(pass) validates clear environment and air gap contract [1.64ms]
+(pass) air gap never initializes proxy listeners, sockets or encoded ambient values [8.06ms]
+(pass) live no-network exact environment, sentinel masks, project rw and runtime ro; sequential cleanup [40.97ms]
+
+test/sandbox/linux-unmakeable-mount-point.test.ts:
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is writable [8.22ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is writable, and of another [7.57ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is unwritable by its mode, and of this user [7.31ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is unwritable by its mode, and of another [6.30ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is on a read-only file system, and of this user [7.48ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is on a read-only file system, and of another [6.40ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is immutable, and of this user [6.41ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > plans for a parent that is failing to answer, and of another [7.17ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > keeps a parent that takes no mount point from being moved aside [21.64ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > takes nothing that turns up at the path for its own [6.34ms]
+(pass) A placeholder where no mount point can be made > by what the parent directory answers > asks for write and search together [6.64ms]
+(pass) A placeholder where no mount point can be made > on any doubt > leaves it out when there is none [7.37ms]
+(pass) A placeholder where no mount point can be made > on any doubt > plans it when the parent cannot be opened [7.04ms]
+(pass) A placeholder where no mount point can be made > on any doubt > plans it when /proc does not say where the descriptor leads [6.60ms]
+(pass) A placeholder where no mount point can be made > on any doubt > plans it when the file system cannot be told [6.91ms]
+(pass) A placeholder where no mount point can be made > on any doubt > closes the descriptor whatever the answer [15.04ms]
+(pass) A placeholder where no mount point can be made > with the parent swapped under the wrap > plans the placeholder when the parent is a symlink as it is opened [7.61ms]
+(pass) A placeholder where no mount point can be made > with the parent swapped under the wrap > plans it when a directory above the parent is a symlink as it is opened [11.44ms]
+(pass) A placeholder where no mount point can be made > with the parent swapped under the wrap > plans it when the parent is swapped once it is open [7.00ms]
+(pass) A placeholder where no mount point can be made > asks everything of one descriptor on the parent, off a Windows drive [9.20ms]
+(pass) A placeholder where no mount point can be made > asks everything of one descriptor on the parent, on a Windows drive [8.31ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > makes the mount point itself, and the clean-up removes it [8.72ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > covers a file with a directory in a folder that takes subfolders and no files [8.31ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > leaves a file out in a folder that takes nothing and is beyond this user [7.28ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > leaves a directory out in a folder that takes nothing and is beyond this user [6.84ms]
+485 | 
+486 |       expect(mountsAt(command, denied)).toEqual([
+487 |         `--ro-bind /dev/null ${denied}`,
+488 |       ])
+489 |       // The mode it has, so that nothing changes.
+490 |       expect(modes).toEqual([0o2750])
+                          ^
+error: expect(received).toEqual(expected)
+
+  [
+-   1512,
++   488,
+  ]
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/srv/sandbox-runtime/.port-081/test/sandbox/linux-unmakeable-mount-point.test.ts:490:21)
+(fail) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans the kind asked for when the name is refused in a folder this user governs [8.21ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans it, and tries nothing, where access() refuses a folder this user governs [6.26ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > leaves it out, and tries nothing, where access() refuses a folder this user does not govern [5.92ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > tries no file where a directory is wanted [6.32ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans it, and takes nothing for its own, when the path is there by the time it is tried [6.65ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a missing folder > plans one directory, as listed [9.16ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a missing folder > plans one directory, reversed [8.64ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a path and one beneath it > plans one directory, as listed [9.56ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > with deny paths that share a path and one beneath it > plans one directory, reversed [8.52ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > removes what it made when the wrap then fails [7.79ms]
+(pass) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > runs on the mount points it made, and the paths cannot be created [19.92ms]
+(pass) A placeholder where no mount point can be made > asks nothing of the host for a path that needs no placeholder [7.78ms]
+(pass) A placeholder where no mount point can be made > asks once for deny paths that share a missing directory [7.13ms]
+(pass) A placeholder where no mount point can be made > in directories of another user > plans no placeholder, and keeps their top-level directories mount points [8.53ms]
+(pass) A placeholder where no mount point can be made > in directories of another user > starts with "/" allowed, and the paths cannot be created [30.75ms]
+(pass) A placeholder where no mount point can be made > in directories of another user > starts with the directories themselves allowed, and the paths cannot be created [18.29ms]
+(pass) A placeholder where no mount point can be made > in a directory of this user that its mode closes > plans the placeholder [6.70ms]
+(pass) A placeholder where no mount point can be made > in a directory of this user that its mode closes > holds the path against a command that opens the directory [15.66ms]
+(pass) A placeholder where no mount point can be made > starts with an absent deny path on a read-only file system [125.77ms]
+
+test/sandbox/linux-one-mount-per-destination.test.ts:
+(pass) One mount per destination > masks each destination once across the whole corpus [66.39ms]
+(pass) One mount per destination > starts on every configuration in the corpus (live bwrap) [143.05ms]
+(pass) One mount per destination > still masks a file denied under several spellings [6.05ms]
+(pass) One mount per destination > leaves a denied file to the credential mask that covers it [5.75ms]
+(pass) One mount per destination > keeps the last fake where two entries name one file [5.44ms]
+(pass) One mount per destination > re-applies a mask a write deny re-exposed, above that deny [5.93ms]
+(pass) Reporting an older bubblewrap > warns, naming the version, about an older bubblewrap [1.10ms]
+(pass) Reporting an older bubblewrap > says nothing about a bubblewrap new enough for everything [0.78ms]
+(pass) Reporting an older bubblewrap > says nothing when the version cannot be asked for [0.73ms]
+(pass) Reporting an older bubblewrap > does not ask again after a probe that got no answer: failing [1.03ms]
+(pass) Reporting an older bubblewrap > does not ask again after a probe that got no answer: wordless [0.98ms]
+(pass) Reporting an older bubblewrap > does not ask again after a probe that got no answer: killed [1.02ms]
+(pass) Reporting an older bubblewrap > does not ask again after a probe that got no answer: hung [5001.32ms]
+
+1 tests failed:
+(fail) A placeholder where no mount point can be made > on a Windows drive under WSL 2 > plans the kind asked for when the name is refused in a folder this user governs [8.21ms]
+
+ 104 pass
+ 1 fail
+ 368 expect() calls
+Ran 105 tests across 6 files. [8.85s]

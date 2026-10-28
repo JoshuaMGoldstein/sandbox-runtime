@@ -24,6 +24,7 @@ export {
   SandboxRuntimeConfigSchema,
   NetworkConfigSchema,
   FilesystemConfigSchema,
+  EnvironmentConfigSchema,
   CredentialsConfigSchema,
   IgnoreViolationsConfigSchema,
   RipgrepConfigSchema,

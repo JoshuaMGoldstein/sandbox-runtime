@@ -1130,12 +1130,13 @@ export function buildGitConfigEnv(opts: {
  * `wrapCommandWithSandbox{Linux,MacOS}`.
  */
 export function buildPosixGitSafeDirEnv(opts: {
+  inherited?: Readonly<Record<string, string | undefined>>
   safeDirs: readonly string[]
   unsetEnvVars?: readonly string[]
   setEnvVars?: Readonly<Record<string, string>>
 }): Record<string, string> {
   const baseEnv: Record<string, string | undefined> = {
-    GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT,
+    GIT_CONFIG_COUNT: (opts.inherited ?? process.env).GIT_CONFIG_COUNT,
   }
   for (const k of opts.unsetEnvVars ?? []) delete baseEnv[k]
   Object.assign(baseEnv, opts.setEnvVars ?? {})

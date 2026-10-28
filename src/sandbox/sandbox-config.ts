@@ -701,6 +701,12 @@ export const NetworkConfigSchema = z.object({
     .describe(
       'If true, hosts not in allowedDomains are denied without consulting the ask callback, and a per-command allow list (registerCommandNetworkLists) is ignored. Set this when allowedDomains is policy enforcement, not a prompt-suppression hint.',
     ),
+  airGapped: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true, create an isolated network namespace without starting or binding any proxy bridge. This is stronger than an empty allowlist, which preserves a proxy for later policy updates.',
+    ),
   deniedResolvedAddresses: z
     .array(addressRangeSchema)
     .optional()
@@ -1033,6 +1039,32 @@ export const IgnoreViolationsConfigSchema = z
 /**
  * Ripgrep configuration schema
  */
+const environmentVariableNameSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    'Environment variable names must be shell-safe identifiers',
+  )
+
+const environmentVariableValueSchema = z
+  .string()
+  .refine(
+    value => !value.includes('\0'),
+    'Environment variable values must not contain NUL bytes',
+  )
+
+export const EnvironmentConfigSchema = z
+  .object({
+    clear: z
+      .literal(true)
+      .describe('Clear the inherited environment before applying variables'),
+    variables: z
+      .record(environmentVariableNameSchema, environmentVariableValueSchema)
+      .default({})
+      .describe('The complete environment visible to the sandboxed child'),
+  })
+  .strict()
+
 export const RipgrepConfigSchema = z.object({
   command: z.string().describe('The ripgrep command to execute'),
   args: z
@@ -1212,6 +1244,9 @@ export const SandboxRuntimeConfigSchema = z
       'Credential handling configuration. Only the explicitly declared files ' +
         'and environment variables are restricted.',
     ),
+    environment: EnvironmentConfigSchema.optional().describe(
+      'Optional exact child environment. When set, inherited host environment variables are cleared before these values are applied.',
+    ),
     ignoreViolations: IgnoreViolationsConfigSchema.optional().describe(
       'Optional configuration for ignoring specific violations',
     ),
@@ -1300,6 +1335,14 @@ export const SandboxRuntimeConfigSchema = z
     ),
   })
   .superRefine((cfg, ctx) => {
+    if (cfg.network.airGapped && cfg.network.allowedDomains.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['network', 'allowedDomains'],
+        message: 'network.airGapped requires an empty allowedDomains list',
+      })
+    }
+
     const mounts = cfg.filesystem.explicitMounts ?? []
     for (let index = 0; index < mounts.length; index++) {
       const mount = mounts[index]!

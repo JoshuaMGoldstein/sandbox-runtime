@@ -1118,12 +1118,32 @@ async function initialize(
   }
 }
 
+function assertLinuxPolicy(runtimeConfig: Partial<SandboxRuntimeConfig>): void {
+  if (
+    getPlatform() !== 'linux' &&
+    (runtimeConfig.environment ||
+      runtimeConfig.network?.airGapped ||
+      runtimeConfig.filesystem?.explicitMounts?.length)
+  ) {
+    throw new Error(
+      'explicitMounts, environment and airGapped policies require Linux',
+    )
+  }
+  if (
+    runtimeConfig.network?.airGapped &&
+    runtimeConfig.network.allowedDomains.length > 0
+  ) {
+    throw new Error('network.airGapped requires an empty allowedDomains list')
+  }
+}
+
 async function initializeSteps(
   runtimeConfig: SandboxRuntimeConfig,
   sandboxAskCallback: SandboxAskCallback | undefined,
   enableLogMonitor: boolean,
   options: SandboxInitializeOptions | undefined,
 ): Promise<void> {
+  assertLinuxPolicy(runtimeConfig)
   // Return if already initializing
   if (initializationPromise) {
     await initializationPromise
@@ -1136,7 +1156,9 @@ async function initializeSteps(
 
   // Resolve parent/upstream proxy from config or HTTP_PROXY env before we
   // start our own listeners (which will later shadow those vars in the child).
-  parentProxy = resolveParentProxy(runtimeConfig.network.parentProxy)
+  parentProxy = runtimeConfig.network.airGapped
+    ? undefined
+    : resolveParentProxy(runtimeConfig.network.parentProxy)
   if (parentProxy) {
     logForDebugging(
       `Parent proxy configured: http=${redactUrl(parentProxy.httpUrl)} ` +
@@ -1508,6 +1530,8 @@ async function initializeSteps(
       throw e
     }
   }
+
+  if (config.network.airGapped) return
 
   // Initialize network infrastructure
   initializationPromise = (async () => {
@@ -2446,6 +2470,13 @@ async function wrapWithSandboxOnce(
   options?: WrapWithSandboxOptions,
 ): Promise<string> {
   const platform = getPlatform()
+  assertLinuxPolicy(customConfig ?? {})
+  if (
+    customConfig?.network?.airGapped !== undefined &&
+    customConfig.network.airGapped !== config?.network.airGapped
+  ) {
+    throw new Error('Changing airGapped requires reset() then initialize()')
+  }
   const commandId = options?.commandId
   registerCommandText(command, options)
   const startedWith = config
@@ -2640,7 +2671,9 @@ async function wrapWithSandboxOnce(
   // Even with empty allowedDomains, we route through proxy so that:
   // 1. updateConfig() can enable network access for already-running processes
   // 2. The proxy blocks all requests when allowlist is empty
-  const needsNetworkProxy = hasNetworkConfig
+  const needsNetworkProxy =
+    hasNetworkConfig &&
+    !(customConfig?.network?.airGapped ?? config?.network.airGapped)
 
   // Wait for network initialization only if proxy is actually needed
   if (needsNetworkProxy) {
@@ -2737,6 +2770,10 @@ async function wrapWithSandboxOnce(
         writeConfig,
         unsetEnvVars: credentialRestrictions.unsetEnvVars,
         setEnvVars: credentialRestrictions.setEnvVars,
+        clearEnvironment: (customConfig?.environment ?? config?.environment)
+          ?.clear,
+        environmentVariables: (customConfig?.environment ?? config?.environment)
+          ?.variables,
         maskedFileBinds: credentialRestrictions.maskedFileBinds,
         maskedFileStoreDir: credentialRestrictions.maskedFileStoreDir,
         enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(),
@@ -2809,6 +2846,7 @@ async function wrapWithSandboxArgv(
   cwd?: string,
   options?: WrapWithSandboxOptions,
 ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
+  assertLinuxPolicy(customConfig ?? {})
   const platform = getPlatform()
 
   if (platform === 'windows') {
@@ -2985,7 +3023,11 @@ async function wrapWithSandboxArgv(
     options,
   )
   const shell = binShell ?? '/bin/bash'
-  return { argv: [shell, '-c', wrapped], env: process.env }
+  const environment = customConfig?.environment ?? config?.environment
+  return {
+    argv: [shell, '-c', wrapped],
+    env: environment?.clear ? { ...environment.variables } : process.env,
+  }
 }
 
 /**
@@ -3016,6 +3058,10 @@ function getConfig(): SandboxRuntimeConfig | undefined {
  * @param newConfig - The new configuration to use
  */
 function updateConfig(newConfig: SandboxRuntimeConfig): void {
+  assertLinuxPolicy(newConfig)
+  if (config && newConfig.network.airGapped !== config.network.airGapped) {
+    throw new Error('Changing airGapped requires reset() then initialize()')
+  }
   if (
     getPlatform() === 'windows' &&
     config &&
@@ -3058,7 +3104,9 @@ function updateConfig(newConfig: SandboxRuntimeConfig): void {
   // servers capture `parentProxy` by value at creation, so changes here take
   // effect only on re-initialize. This keeps the state consistent for the
   // next initialize() call.
-  parentProxy = resolveParentProxy(newConfig.network.parentProxy)
+  parentProxy = newConfig.network.airGapped
+    ? undefined
+    : resolveParentProxy(newConfig.network.parentProxy)
   logForDebugging('Sandbox configuration updated')
 }
 
