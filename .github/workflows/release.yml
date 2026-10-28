@@ -237,7 +237,7 @@ jobs:
     # Checks nothing out and builds nothing: publishes the tarball that
     # pack uploaded and verify-package installed.
     name: Publish to npm
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && github.repository == 'anthropics/sandbox-runtime'
     needs: [pack, verify-package]
     runs-on: ubuntu-24.04
     environment: npm
