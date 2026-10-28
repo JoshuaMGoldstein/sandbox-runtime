@@ -2746,6 +2746,9 @@ async function wrapWithSandboxOnce(
         ripgrepConfig: getRipgrepConfig(),
         mandatoryDenySearchDepth: getMandatoryDenySearchDepth(),
         allowGitConfig: getAllowGitConfig(),
+        explicitMounts:
+          customConfig?.filesystem?.explicitMounts ??
+          config?.filesystem.explicitMounts,
         gitSafeDirectories,
         seccompConfig: getSeccompConfig(),
         bwrapPath: config?.bwrapPath,

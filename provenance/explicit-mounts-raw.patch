@@ -1,0 +1,132 @@
+diff --git a/src/sandbox/linux-sandbox-utils.ts b/src/sandbox/linux-sandbox-utils.ts
+index 66f9db7..dd5a083 100644
+--- a/src/sandbox/linux-sandbox-utils.ts
++++ b/src/sandbox/linux-sandbox-utils.ts
+@@ -86,6 +86,12 @@ export interface LinuxSandboxParams {
+   mandatoryDenySearchDepth?: number
+   /** Allow writes to .git/config files (default: false) */
+   allowGitConfig?: boolean
++  /** Explicit host-to-sandbox mounts emitted after filesystem policy mounts. */
++  explicitMounts?: Array<{
++    source: string
++    destination: string
++    mode: 'ro' | 'rw'
++  }>
+   /**
+    * Directories to emit as `safe.directory` via `GIT_CONFIG_*` env
+    * vars (see {@link buildPosixGitSafeDirEnv}). Under `--unshare-user`
+@@ -3554,6 +3560,7 @@ export async function wrapCommandWithSandboxLinux(
+     ripgrepConfig = { command: 'rg' },
+     mandatoryDenySearchDepth = DEFAULT_MANDATORY_DENY_SEARCH_DEPTH,
+     allowGitConfig = false,
++    explicitMounts,
+     gitSafeDirectories,
+     seccompConfig,
+     bwrapPath,
+@@ -3791,6 +3798,13 @@ export async function wrapCommandWithSandboxLinux(
+     )
+     const mountsStart = bwrapArgs.length
+     bwrapArgs.push(...fsArgs)
++    for (const mount of explicitMounts ?? []) {
++      bwrapArgs.push(
++        mount.mode === 'ro' ? '--ro-bind' : '--bind',
++        mount.source,
++        mount.destination,
++      )
++    }
+     const mounts = {
+       start: mountsStart,
+       end: bwrapArgs.length,
+diff --git a/src/sandbox/sandbox-config.ts b/src/sandbox/sandbox-config.ts
+index 3c4f969..ce8e704 100644
+--- a/src/sandbox/sandbox-config.ts
++++ b/src/sandbox/sandbox-config.ts
+@@ -951,6 +951,30 @@ export const NetworkConfigSchema = z.object({
+   ),
+ })
+ 
++const absoluteNormalizedMountPathSchema = z
++  .string()
++  .refine(
++    value =>
++      posixPath.isAbsolute(value) && posixPath.normalize(value) === value,
++    'Mount paths must be absolute and normalized',
++  )
++  .refine(
++    value => !value.includes('\0'),
++    'Mount paths must not contain NUL bytes',
++  )
++
++const explicitMountSchema = z
++  .object({
++    source: absoluteNormalizedMountPathSchema.describe(
++      'Absolute normalized host path to mount.',
++    ),
++    destination: absoluteNormalizedMountPathSchema.describe(
++      'Absolute normalized path inside the Linux sandbox.',
++    ),
++    mode: z.enum(['ro', 'rw']).describe('Read-only or read-write mount mode.'),
++  })
++  .strict()
++
+ /**
+  * Filesystem configuration schema for validation
+  */
+@@ -988,6 +1012,12 @@ export const FilesystemConfigSchema = z.object({
+     .describe(
+       'Allow writes to .git/config files (default: false). Enables git remote URL updates while keeping .git/hooks protected.',
+     ),
++  explicitMounts: z
++    .array(explicitMountSchema)
++    .optional()
++    .describe(
++      'Linux-only explicit host-to-sandbox bind mounts emitted after filesystem policy mounts.',
++    ),
+ })
+ 
+ /**
+@@ -1270,6 +1300,30 @@ export const SandboxRuntimeConfigSchema = z
+     ),
+   })
+   .superRefine((cfg, ctx) => {
++    const mounts = cfg.filesystem.explicitMounts ?? []
++    for (let index = 0; index < mounts.length; index++) {
++      const mount = mounts[index]!
++      if (
++        mounts.some(
++          (other, otherIndex) =>
++            otherIndex !== index &&
++            (other.destination === mount.destination ||
++              other.destination.startsWith(
++                mount.destination === '/' ? '/' : mount.destination + '/',
++              ) ||
++              mount.destination.startsWith(
++                other.destination === '/' ? '/' : other.destination + '/',
++              )),
++        )
++      ) {
++        ctx.addIssue({
++          code: z.ZodIssueCode.custom,
++          path: ['filesystem', 'explicitMounts', index, 'destination'],
++          message: 'Mount destinations must not overlap',
++        })
++      }
++    }
++
+     // filesystem.disabled drops every filesystem rule, the credential file
+     // denies included (getFsReadConfig, getFsWriteConfig and
+     // computeWindowsFsAccessSet all short-circuit on it), so an inert deny
+diff --git a/src/sandbox/sandbox-manager.ts b/src/sandbox/sandbox-manager.ts
+index 545f5df..9132171 100644
+--- a/src/sandbox/sandbox-manager.ts
++++ b/src/sandbox/sandbox-manager.ts
+@@ -2746,6 +2746,9 @@ async function wrapWithSandboxOnce(
+         ripgrepConfig: getRipgrepConfig(),
+         mandatoryDenySearchDepth: getMandatoryDenySearchDepth(),
+         allowGitConfig: getAllowGitConfig(),
++        explicitMounts:
++          customConfig?.filesystem?.explicitMounts ??
++          config?.filesystem.explicitMounts,
+         gitSafeDirectories,
+         seccompConfig: getSeccompConfig(),
+         bwrapPath: config?.bwrapPath,
