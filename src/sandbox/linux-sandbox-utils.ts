@@ -8,7 +8,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { endianness, tmpdir } from 'node:os'
 import path, { join } from 'node:path'
-import { ripGrep, RipgrepError, type RipgrepConfig } from '../utils/ripgrep.js'
+import { ripGrep, type RipgrepConfig } from '../utils/ripgrep.js'
 import { buildJavaToolOptions } from './java-proxy-agent.js'
 import { readNamesOf, writeNamesOf } from './path-entries.js'
 import {
@@ -608,22 +608,13 @@ async function linuxGetMandatoryDenyPaths(
       cwd,
       signal,
       ripgrepConfig,
+      true,
     )
   } catch (error) {
-    // Stopped, it found nothing: the caller must not be handed a command
-    // without the denies it would have found.
     signal.throwIfAborted()
-    // INVARIANT: what ripgrep listed counts, however it ended. It exits 2 if
-    // there was a directory it could not read, having listed the rest, and is
-    // killed after ten seconds. What it had not come to by then is not denied.
-    if (error instanceof RipgrepError) {
-      matches = error.listed
-      // A read-only bind also keeps the command from giving the mode back.
-      denyPaths.push(...unreadableDirectories(error.stderr, cwd, maxDepth))
-    }
-    logForDebugging(`[Sandbox] ripgrep scan failed: ${error}`, {
-      level: 'warn',
-    })
+    throw new Error(
+      `Mandatory deny scan failed; refusing to launch sandbox: ${String(error)}`,
+    )
   }
 
   // The names a match can lie under, by path component.
