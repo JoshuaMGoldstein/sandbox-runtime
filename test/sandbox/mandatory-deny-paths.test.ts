@@ -347,9 +347,14 @@ describe.if(isSupportedPlatform)(
         mkdirSync(unreadable, { mode: 0o000 })
         try {
           for (const name of ['sub/.bashrc', 'sub/.git/hooks/pre-commit']) {
-            const result = await runSandboxedWrite(name, MODIFIED_CONTENT)
-
-            expect([name, result.success]).toEqual([name, false])
+            if (isLinux && process.getuid?.() !== 0) {
+              await expect(
+                runSandboxedWrite(name, MODIFIED_CONTENT),
+              ).rejects.toThrow('Mandatory deny scan failed')
+            } else {
+              const result = await runSandboxedWrite(name, MODIFIED_CONTENT)
+              expect([name, result.success]).toEqual([name, false])
+            }
             expect(readFileSync(name, 'utf8')).toBe(ORIGINAL_CONTENT)
           }
         } finally {
@@ -381,12 +386,17 @@ describe.if(isSupportedPlatform)(
               for (const name of names) {
                 // Each time: a command that is not held gives the mode back.
                 chmodSync(join(TEST_DIR, directory), mode)
-                const result = await runSandboxed(
+                const attempt = runSandboxed(
                   `chmod 755 locked '${directory}'; echo x > 'locked/${name}'`,
                   threads,
                 )
-
-                expect([name, result.success]).toEqual([name, false])
+                if (isLinux && process.getuid?.() !== 0) {
+                  await expect(attempt).rejects.toThrow(
+                    'Mandatory deny scan failed',
+                  )
+                } else {
+                  expect([name, (await attempt).success]).toEqual([name, false])
+                }
               }
             } finally {
               chmodSync(join(TEST_DIR, directory), 0o755)
@@ -466,13 +476,15 @@ describe.if(isSupportedPlatform)(
           chmodSync(join(project, 'listed-only'), 0o444)
           chmodSync(join(project, 'entered-only'), 0o111)
           try {
-            const wrapped = await wrapCommandWithSandboxLinux({
-              command: 'true',
-              needsNetworkRestriction: false,
-              readConfig: undefined,
-              writeConfig: { allowOnly: ['.'], denyWithinAllow: [] },
-              ripgrepConfig: { command: standIn },
-            })
+            await expect(
+              wrapCommandWithSandboxLinux({
+                command: 'true',
+                needsNetworkRestriction: false,
+                readConfig: undefined,
+                writeConfig: { allowOnly: ['.'], denyWithinAllow: [] },
+                ripgrepConfig: { command: standIn },
+              }),
+            ).rejects.toThrow('Mandatory deny scan failed')
 
             expect(unreadableDirectories(said.join('\n'), project, 3)).toEqual([
               join(project, 'really-locked'),
@@ -492,7 +504,6 @@ describe.if(isSupportedPlatform)(
             } finally {
               getuid.mockRestore()
             }
-            expect(wrapped).toContain('really-locked')
             expect(readFileSync(asked, 'utf8').split('\n')).toEqual(
               expect.arrayContaining([
                 '--no-ignore',
