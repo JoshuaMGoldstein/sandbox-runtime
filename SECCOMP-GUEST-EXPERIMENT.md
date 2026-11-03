@@ -1,0 +1,9 @@
+# Experimental guest seccomp helper trust boundary
+
+This uncommitted draft is based on b212b8781799ceae8dd13d5d1ab117254d65179d and is not integration-ready.
+
+`seccomp.applyPath` must identify a trusted host helper. The helper, every parent directory, and relevant mount namespace must be controlled by the trusted operator and protected from modification or replacement by untrusted actors throughout validation, plan construction, and bubblewrap opening the mount source. This is a deployment assumption, not a guarantee enforced by the runtime. A trusted same-user process may still replace or modify the file, and a read-only guest bind does not prevent host-side changes. Current realpath/stat/access checks do not pin the inode or its contents; an attacker able to modify the source can replace it after validation, including with a program that does not install seccomp. Rechecking immediately before returning the plan cannot close this race: launch happens later in a separate caller process.
+
+A stronger design requires pinning helper identity/content and passing an inherited open descriptor to bubblewrap with explicit lifetime and cleanup across both string and argv APIs, plus protection against writes to the pinned inode. That is not implemented. Do not use this experiment where the trusted helper and parents assumption cannot be met.
+
+The draft rejects explicit mount destinations overlapping `/run/zmux` or its ancestors, including `/run` itself and checked aliases. Sibling mounts beneath `/run` are permitted and have been exercised read-only and read-write. Proxy and observer socket paths beneath `/run` remain unsupported. Alias checks are point-in-time and do not protect against host namespace races. The root-deny plan must produce the existing `/run` tmpfs, which is remounted read-only; host `/run` contents are hidden and workloads expecting writable `/run` outside granted mounts may fail.
