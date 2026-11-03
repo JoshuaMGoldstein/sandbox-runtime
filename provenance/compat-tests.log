@@ -1,0 +1,17 @@
+bun test v1.3.14 (0d9b296a)
+
+test/sandbox/explicit-mounts.test.ts:
+(pass) explicit mounts > preserves normalized mounts [4.64ms]
+(pass) explicit mounts > rejects relative, non-normalized, NUL, duplicate and overlapping destinations [1.89ms]
+(pass) explicit mounts > emits ro/rw binds after policy masks and before sandbox devices [17.58ms]
+(pass) explicit mounts > forwards the session plan through the manager [191.04ms]
+
+test/sandbox/zmux-compat.test.ts:
+(pass) validates clear environment and air gap contract [1.82ms]
+(pass) air gap never initializes proxy listeners, sockets or encoded ambient values [10.16ms]
+(pass) live no-network exact environment, sentinel masks, project rw and runtime ro; sequential cleanup [43.12ms]
+
+ 7 pass
+ 0 fail
+ 38 expect() calls
+Ran 7 tests across 2 files. [369.00ms]

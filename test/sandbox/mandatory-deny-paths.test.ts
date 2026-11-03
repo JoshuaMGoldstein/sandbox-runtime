@@ -6,11 +6,13 @@ import {
   afterAll,
   beforeEach,
   afterEach,
+  spyOn,
 } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   mkdirSync,
+  readdirSync,
   rmdirSync,
   rmSync,
   writeFileSync,
@@ -29,6 +31,8 @@ import {
 import {
   wrapCommandWithSandboxLinux,
   cleanupBwrapMountPoints,
+  unreadableDirectories,
+  type LinuxSandboxParams,
 } from '../../src/sandbox/linux-sandbox-utils.js'
 import {
   DANGEROUS_FILES,
@@ -343,9 +347,16 @@ describe.if(isSupportedPlatform)(
         mkdirSync(unreadable, { mode: 0o000 })
         try {
           for (const name of ['sub/.bashrc', 'sub/.git/hooks/pre-commit']) {
-            const result = await runSandboxedWrite(name, MODIFIED_CONTENT)
-
-            expect([name, result.success]).toEqual([name, false])
+            if (isLinux && process.getuid?.() !== 0) {
+              // Bun rejection matchers are asynchronous despite their declared return type.
+              // eslint-disable-next-line @typescript-eslint/await-thenable
+              await expect(
+                runSandboxedWrite(name, MODIFIED_CONTENT),
+              ).rejects.toThrow('Mandatory deny scan failed')
+            } else {
+              const result = await runSandboxedWrite(name, MODIFIED_CONTENT)
+              expect([name, result.success]).toEqual([name, false])
+            }
             expect(readFileSync(name, 'utf8')).toBe(ORIGINAL_CONTENT)
           }
         } finally {
@@ -377,12 +388,19 @@ describe.if(isSupportedPlatform)(
               for (const name of names) {
                 // Each time: a command that is not held gives the mode back.
                 chmodSync(join(TEST_DIR, directory), mode)
-                const result = await runSandboxed(
+                const attempt = runSandboxed(
                   `chmod 755 locked '${directory}'; echo x > 'locked/${name}'`,
                   threads,
                 )
-
-                expect([name, result.success]).toEqual([name, false])
+                if (isLinux && process.getuid?.() !== 0) {
+                  // Bun rejection matchers are asynchronous despite their declared return type.
+                  // eslint-disable-next-line @typescript-eslint/await-thenable
+                  await expect(attempt).rejects.toThrow(
+                    'Mandatory deny scan failed',
+                  )
+                } else {
+                  expect([name, (await attempt).success]).toEqual([name, false])
+                }
               }
             } finally {
               chmodSync(join(TEST_DIR, directory), 0o755)
@@ -398,25 +416,115 @@ describe.if(isSupportedPlatform)(
 
       // root reads a directory of any mode.
       it.if(isLinux && process.getuid?.() !== 0)(
-        'denies an unreadable owned directory without an external scanner',
+        'takes what ripgrep says it could not read for a hint only',
         async () => {
-          const project = join(TEST_DIR, 'unreadable-owned-directory')
-          const locked = join(project, 'really-locked')
-          mkdirSync(locked, { recursive: true })
-          writeFileSync(join(locked, '.bashrc'), ORIGINAL_CONTENT)
+          const project = join(TEST_DIR, 'hints')
+          const outside = join(TEST_DIR, 'hints-outside')
+          for (const directory of [
+            join(project, 'is-readable'),
+            join(project, 'really-locked'),
+            join(project, 'locked: too'),
+            join(project, 'locked\\so'),
+            join(project, 'one-thread'),
+            join(project, 'no-prefix'),
+            join(project, 'listed-only/child'),
+            join(project, 'entered-only'),
+            join(project, 'a/b/c/too-deep'),
+            join(outside, 'behind-a-link'),
+          ]) {
+            mkdirSync(directory, { recursive: true })
+          }
+          symlinkSync(outside, join(project, 'link'))
+          const locked = [
+            join(project, 'really-locked'),
+            join(project, 'locked: too'),
+            join(project, 'locked\\so'),
+            join(project, 'one-thread'),
+            join(project, 'no-prefix'),
+            join(project, 'a/b/c/too-deep'),
+            join(outside, 'behind-a-link'),
+          ]
+          // What a name in the tree could make ripgrep say.
+          const said = [
+            'is-readable',
+            'really-locked',
+            'a/b/c/too-deep',
+            'link/behind-a-link',
+            '../hints-outside/behind-a-link',
+            'not-there/at-all',
+            'entered-only/not-there',
+            'locked: too',
+            'locked\\so',
+            'listed-only/child',
+          ].map(
+            name => `rg: ${project}/${name}: Permission denied (os error 13)`,
+          )
+          said.push(
+            `rg: ${project}/one-thread: IO error for operation on ${project}/one-thread: Permission denied (os error 13)`,
+            `${project}/no-prefix: Permission denied (os error 13)`,
+          )
+          const standIn = join(TEST_DIR, 'says-it-could-not-read')
+          const asked = join(TEST_DIR, 'was-asked')
+          writeFileSync(
+            standIn,
+            [
+              '#!/bin/sh',
+              `printf '%s\\n' "$@" > '${asked}'`,
+              ...said.map(line => `echo '${line}' >&2`),
+              'exit 2',
+            ].join('\n'),
+            { mode: 0o755 },
+          )
           process.chdir(project)
-          chmodSync(locked, 0o000)
+          locked.forEach(directory => chmodSync(directory, 0o000))
+          chmodSync(join(project, 'listed-only'), 0o444)
+          chmodSync(join(project, 'entered-only'), 0o111)
           try {
-            const wrapped = await wrapCommandWithSandboxLinux({
-              command: 'true',
-              needsNetworkRestriction: false,
-              readConfig: undefined,
-              writeConfig: { allowOnly: ['.'], denyWithinAllow: [] },
-            })
+            // Bun rejection matchers are asynchronous despite their declared return type.
+            // eslint-disable-next-line @typescript-eslint/await-thenable
+            await expect(
+              wrapCommandWithSandboxLinux({
+                command: 'true',
+                needsNetworkRestriction: false,
+                readConfig: undefined,
+                writeConfig: { allowOnly: ['.'], denyWithinAllow: [] },
+                ripgrepConfig: { command: standIn },
+              }),
+            ).rejects.toThrow('Mandatory deny scan failed')
 
-            expect(wrapped).toContain('really-locked')
+            expect(unreadableDirectories(said.join('\n'), project, 3)).toEqual([
+              join(project, 'really-locked'),
+              join(project, 'locked: too'),
+              join(project, 'locked\\so'),
+              join(project, 'listed-only'),
+              join(project, 'one-thread'),
+              join(project, 'no-prefix'),
+            ])
+            // Nobody else's mode can be given back from inside.
+            const uid = process.getuid!()
+            const getuid = spyOn(process, 'getuid').mockReturnValue(uid + 1)
+            try {
+              expect(
+                unreadableDirectories(said.join('\n'), project, 3),
+              ).toEqual([])
+            } finally {
+              getuid.mockRestore()
+            }
+            expect(readFileSync(asked, 'utf8').split('\n')).toEqual(
+              expect.arrayContaining([
+                '--no-ignore',
+                '--no-config',
+                '--line-buffered',
+              ]),
+            )
           } finally {
-            chmodSync(locked, 0o755)
+            for (const directory of [
+              ...locked,
+              join(project, 'listed-only'),
+              join(project, 'entered-only'),
+            ]) {
+              chmodSync(directory, 0o755)
+            }
           }
         },
       )
@@ -991,6 +1099,219 @@ describe.if(isSupportedPlatform)(
             rmSync(raceDir, { recursive: true, force: true })
           }
         }, 15000)
+
+        // The caller runs no cleanup for a wrap that threw, so a removal
+        // deferred to that wrap has nobody else to run it.
+
+        const wrapInCwd = (
+          command: string,
+          failing?: Partial<LinuxSandboxParams>,
+        ): Promise<string> =>
+          wrapCommandWithSandboxLinux({
+            command,
+            needsNetworkRestriction: false,
+            readConfig: undefined,
+            writeConfig: { allowOnly: ['.'], denyWithinAllow: [] },
+            enableWeakerNestedSandbox: true,
+            allowAllUnixSockets: true,
+            ...failing,
+          })
+
+        it.each(['aborted', 'refused'])(
+          'runs the cleanup deferred to a wrap that is then %s',
+          async how => {
+            const raceDir = join(TEST_DIR, 'race-test-4')
+            mkdirSync(raceDir, { recursive: true })
+            process.chdir(raceDir)
+
+            try {
+              spawnSync(await wrapInCwd('true'), {
+                shell: true,
+                timeout: 10000,
+              })
+              expect(readdirSync(raceDir)).toContain('.bashrc')
+
+              // B is still looking for the mandatory denies when A's caller
+              // cleans up.
+              const controller = new AbortController()
+              const wrappedB = wrapInCwd('true', {
+                abortSignal: controller.signal,
+                binShell: how === 'refused' ? 'no-such-shell' : undefined,
+              })
+              cleanupBwrapMountPoints()
+              expect(readdirSync(raceDir)).toContain('.bashrc')
+
+              if (how === 'aborted') controller.abort(new Error('stopped'))
+              expect(await wrappedB.catch((e: unknown) => e)).toBeInstanceOf(
+                Error,
+              )
+              expect(readdirSync(raceDir)).toEqual([])
+            } finally {
+              process.chdir(TEST_DIR)
+              rmSync(raceDir, { recursive: true, force: true })
+            }
+          },
+        )
+
+        it('forgets the mount points planned by a wrap that is then refused', async () => {
+          const raceDir = join(TEST_DIR, 'race-test-6')
+          mkdirSync(raceDir, { recursive: true })
+          process.chdir(raceDir)
+
+          try {
+            expect(
+              await wrapInCwd('true', { binShell: 'no-such-shell' }).catch(
+                (e: unknown) => e,
+              ),
+            ).toBeInstanceOf(Error)
+
+            // bwrap never ran, so this is no mount point: the host made it.
+            writeFileSync('.mcp.json', '')
+            spawnSync(await wrapInCwd('true'), { shell: true, timeout: 10000 })
+            cleanupBwrapMountPoints()
+            expect(readdirSync(raceDir)).toEqual(['.mcp.json'])
+          } finally {
+            process.chdir(TEST_DIR)
+            rmSync(raceDir, { recursive: true, force: true })
+          }
+        })
+
+        it.each([
+          ['aborted', 'counted along with it'],
+          ['aborted', 'started since a forced cleanup'],
+          ['handed out', 'started since a forced cleanup'],
+        ])(
+          'a wrap that is %s leaves the mount points of a running sandbox %s',
+          async (how, which) => {
+            const raceDir = join(TEST_DIR, 'race-test-5')
+            mkdirSync(raceDir, { recursive: true })
+            process.chdir(raceDir)
+            // Stands in for ripgrep, and goes on until told to end.
+            const heldScan = join(raceDir, 'held-scan')
+            writeFileSync(
+              heldScan,
+              `#!/bin/sh\nuntil [ -e '${raceDir}/scanned' ]; do sleep 0.1; done\n`,
+              { mode: 0o755 },
+            )
+
+            try {
+              const controller = new AbortController()
+              const wrappedB = wrapInCwd('true', {
+                abortSignal: controller.signal,
+                ripgrepConfig: { command: heldScan },
+              })
+              if (which !== 'counted along with it') {
+                cleanupBwrapMountPoints({ force: true })
+              }
+
+              // C runs throughout, and tries a denied name once told to.
+              const childC = spawn(
+                await wrapInCwd(
+                  'until [ -e go ]; do sleep 0.1; done; echo WRITTEN > .bashrc',
+                ),
+                { shell: true },
+              )
+              const exitC = new Promise<void>(resolve => {
+                childC.on('exit', () => resolve())
+              })
+              while (!existsSync('.bashrc')) {
+                await new Promise(r => setTimeout(r, 50))
+              }
+
+              if (how === 'aborted') {
+                controller.abort(new Error('stopped'))
+                expect(await wrappedB.catch((e: unknown) => e)).toBeInstanceOf(
+                  Error,
+                )
+              } else {
+                writeFileSync('scanned', '')
+                spawnSync(await wrappedB, { shell: true, timeout: 10000 })
+                cleanupBwrapMountPoints()
+              }
+              expect(existsSync('.bashrc')).toBe(true)
+
+              // C is still counted, so the next command to end defers to it.
+              spawnSync(await wrapInCwd('true'), {
+                shell: true,
+                timeout: 10000,
+              })
+              cleanupBwrapMountPoints()
+              expect(existsSync('.bashrc')).toBe(true)
+
+              writeFileSync('go', '')
+              await exitC
+              expect(readFileSync('.bashrc', 'utf8')).toBe('')
+
+              cleanupBwrapMountPoints()
+              expect(existsSync('.bashrc')).toBe(false)
+            } finally {
+              process.chdir(TEST_DIR)
+              rmSync(raceDir, { recursive: true, force: true })
+            }
+          },
+          15000,
+        )
+
+        it('leaves nothing of a directory mount point that another sandbox was wrapped under', async () => {
+          const raceDir = join(TEST_DIR, 'race-test-7')
+          mkdirSync(raceDir, { recursive: true })
+          process.chdir(raceDir)
+
+          try {
+            const childT = spawn(
+              await wrapInCwd('until [ -e go ]; do sleep 0.1; done'),
+              { shell: true },
+            )
+            const exitT = new Promise<void>(resolve => {
+              childT.on('exit', () => resolve())
+            })
+            while (!existsSync('.claude')) {
+              await new Promise(r => setTimeout(r, 50))
+            }
+
+            // T's .claude is there by now, so X's mount points go inside it.
+            spawnSync(await wrapInCwd('true'), { shell: true, timeout: 10000 })
+            cleanupBwrapMountPoints()
+            expect(readdirSync('.claude')).not.toEqual([])
+
+            writeFileSync('go', '')
+            await exitT
+            cleanupBwrapMountPoints()
+            expect(readdirSync(raceDir)).toEqual(['go'])
+
+            spawnSync(await wrapInCwd('true'), { shell: true, timeout: 10000 })
+            cleanupBwrapMountPoints()
+            expect(readdirSync(raceDir)).toEqual(['go'])
+          } finally {
+            process.chdir(TEST_DIR)
+            rmSync(raceDir, { recursive: true, force: true })
+          }
+        }, 15000)
+
+        it('takes only its own where the host has written at a mount point or inside one', async () => {
+          const raceDir = join(TEST_DIR, 'race-test-8')
+          mkdirSync(raceDir, { recursive: true })
+          process.chdir(raceDir)
+
+          try {
+            // The second is wrapped with the first's .claude there.
+            spawnSync(await wrapInCwd('true'), { shell: true, timeout: 10000 })
+            spawnSync(await wrapInCwd('true'), { shell: true, timeout: 10000 })
+            expect(readdirSync('.claude')).not.toEqual([])
+            writeFileSync('.claude/kept', '')
+            rmSync('.bashrc')
+            writeFileSync('.bashrc', 'kept')
+
+            cleanupBwrapMountPoints()
+            cleanupBwrapMountPoints()
+            expect(readdirSync(raceDir).sort()).toEqual(['.bashrc', '.claude'])
+            expect(readdirSync('.claude')).toEqual(['kept'])
+            expect(readFileSync('.bashrc', 'utf8')).toBe('kept')
+          } finally {
+            process.chdir(TEST_DIR)
+            rmSync(raceDir, { recursive: true, force: true })
+          }
+        })
 
         it('non-existent .git/hooks deny does not turn .git into a file, breaking git', async () => {
           // When .git doesn't exist yet, denying .git/hooks causes

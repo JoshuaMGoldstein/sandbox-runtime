@@ -2,13 +2,10 @@ import { describe, it, expect } from 'bun:test'
 import { writeFileSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
-import { whichSync } from '../../src/utils/which.js'
 import { ripGrep, RipgrepError } from '../../src/utils/ripgrep.js'
 
-const hasRipgrep = whichSync('rg') !== null
-
 describe('ripGrep', () => {
-  it.if(hasRipgrep)('finds matches with default config', async () => {
+  it('finds matches with default config', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rg-test-'))
     try {
       writeFileSync(join(dir, 'a.txt'), 'hello\nworld\nfoo')
@@ -24,23 +21,20 @@ describe('ripGrep', () => {
     }
   })
 
-  it.if(hasRipgrep)(
-    'returns empty array on no matches (exit code 1)',
-    async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'rg-test-'))
-      try {
-        writeFileSync(join(dir, 'a.txt'), 'hello')
-        const results = await ripGrep(
-          ['-l', 'nonexistent-pattern-xyz'],
-          dir,
-          new AbortController().signal,
-        )
-        expect(results).toEqual([])
-      } finally {
-        rmSync(dir, { recursive: true })
-      }
-    },
-  )
+  it('returns empty array on no matches (exit code 1)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rg-test-'))
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'hello')
+      const results = await ripGrep(
+        ['-l', 'nonexistent-pattern-xyz'],
+        dir,
+        new AbortController().signal,
+      )
+      expect(results).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
+  })
 
   it('passes argv0 to spawn (multicall binary dispatch)', async () => {
     // Spawn node with a script that echoes process.argv0 — shell scripts can't
@@ -104,7 +98,7 @@ describe('ripGrep', () => {
     }
   })
 
-  it.if(hasRipgrep)('rejects on exit code > 1', () => {
+  it('rejects on exit code > 1', () => {
     expect(
       ripGrep(['--invalid-flag-xyz'], '.', new AbortController().signal),
     ).rejects.toThrow(/ripgrep failed/)

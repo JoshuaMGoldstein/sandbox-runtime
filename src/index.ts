@@ -1,6 +1,10 @@
 // Library exports
 export { SandboxManager } from './sandbox/sandbox-manager.js'
-export type { WrapWithSandboxOptions } from './sandbox/sandbox-manager.js'
+export type { WindowsProfileReadWarning } from './sandbox/sandbox-manager.js'
+export type {
+  WrapWithSandboxOptions,
+  SandboxInitializeOptions,
+} from './sandbox/sandbox-manager.js'
 export { SandboxViolationStore } from './sandbox/sandbox-violation-store.js'
 
 // Configuration types and schemas
@@ -10,7 +14,6 @@ export type {
   FilesystemConfig,
   FilesystemPathEntry,
   CredentialsConfig,
-  EnvironmentConfig,
   CredentialFileConfig,
   CredentialEnvVarConfig,
   CredentialMode,
@@ -21,8 +24,8 @@ export {
   SandboxRuntimeConfigSchema,
   NetworkConfigSchema,
   FilesystemConfigSchema,
-  CredentialsConfigSchema,
   EnvironmentConfigSchema,
+  CredentialsConfigSchema,
   IgnoreViolationsConfigSchema,
   RipgrepConfigSchema,
 } from './sandbox/sandbox-config.js'
@@ -41,6 +44,7 @@ export type {
 export type {
   FilterRequestCallback,
   RequestDecision,
+  RequestInfo,
   MutateForwardedHeaders,
 } from './sandbox/request-filter.js'
 
@@ -79,12 +83,25 @@ export {
   restoreWindowsAcl,
   grantWindowsAcl,
   revokeWindowsAcl,
+  revokeWindowsAclChecked,
+  grantWindowsProfileRead,
+  forgetWindowsProfileRead,
+  forgetWindowsProfileReadAsync,
+  getWindowsProfileReadStatus,
+  getWindowsProfileReadStatusAsync,
+  windowsProfileReadEnv,
+  windowsProfileExclusionConflicts,
+  windowsProfileGrantSkipReason,
+  windowsProfileGrantNotice,
+  WINDOWS_PROFILE_READ_ENV_VARS,
   expandWindowsFsPaths,
   buildGitConfigEnv,
   parseWindowsBinShell,
   parseWindowsSandboxError,
   isUncPath,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+  WINDOWS_ALLOW_LOOPBACK_EFFECT,
+  WINDOWS_LOOPBACK_PROBE_PORT,
   SRT_WIN_DISPATCH_ARG1,
 } from './sandbox/windows-sandbox-utils.js'
 export type {
@@ -92,12 +109,25 @@ export type {
   WindowsSandboxStatus,
   WindowsBinShell,
   MappedDriveCwdError,
+  SeclogonDisabledError,
+  WindowsSeclogonState,
   WindowsInstallOptions,
   WindowsInstallResult,
   WindowsWfpStatus,
   WindowsAclStampOptions,
   WindowsAclGrantOptions,
   WindowsAclAceOutcome,
+  WindowsWfpProbeOutcome,
+  WindowsWfpResidual,
+  WindowsAclRevokeResult,
+  WindowsProfileGrantState,
+  WindowsProfileGrantStatus,
+  WindowsProfileGrantPath,
+  WindowsProfileGrantOptions,
+  WindowsProfileGrantResult,
+  WindowsProfileGrantItem,
+  WindowsInstallProfileGrant,
+  WindowsProfileExclusionConflict,
   WindowsWfpStatusResult,
   WindowsWfpVerifyResult,
   WindowsSandboxUserStatus,
@@ -128,6 +158,8 @@ export {
 // Utility functions
 export { getDefaultWritePaths } from './sandbox/sandbox-utils.js'
 export { writeRootsOf } from './sandbox/path-entries.js'
+// Where the library takes a path to be: for a caller that judges paths itself.
+export { realPathOf } from './utils/real-path.js'
 
 // Platform utilities
 export { getWslVersion } from './utils/platform.js'

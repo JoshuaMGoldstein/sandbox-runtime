@@ -22,6 +22,7 @@ export async function ripGrep(
   target: string,
   abortSignal: AbortSignal,
   config: RipgrepConfig = { command: 'rg' },
+  requireComplete = false,
 ): Promise<string[]> {
   const { command, args: commandArgs = [], argv0 } = config
 
@@ -41,6 +42,16 @@ export async function ripGrep(
     }),
   ])
 
+  if (
+    requireComplete &&
+    (stderr.length > 0 || (code === 1 && stdout.length > 0))
+  ) {
+    throw new RipgrepError(
+      'ripgrep returned incomplete or inconsistent output',
+      [],
+      stderr,
+    )
+  }
   if (code === 0) {
     return stdout.trim().split('\n').filter(Boolean)
   }

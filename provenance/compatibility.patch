@@ -1,0 +1,353 @@
+diff --git a/package-lock.json b/package-lock.json
+index 86a5938..3dc3f94 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "@anthropic-ai/sandbox-runtime",
+-  "version": "0.0.81",
++  "version": "0.0.81-zmux.1",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "@anthropic-ai/sandbox-runtime",
+-      "version": "0.0.81",
++      "version": "0.0.81-zmux.1",
+       "license": "Apache-2.0",
+       "dependencies": {
+         "@pondwader/socks5-server": "^1.0.10",
+diff --git a/package.json b/package.json
+index 98b5774..5666295 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@anthropic-ai/sandbox-runtime",
+-  "version": "0.0.81",
++  "version": "0.0.81-zmux.1",
+   "description": "Anthropic Sandbox Runtime (ASRT) - A general-purpose tool for wrapping security boundaries around arbitrary processes",
+   "type": "module",
+   "main": "./dist/index.js",
+diff --git a/provenance/HANDOFF.md b/provenance/HANDOFF.md
+index 4817fd2..be0e36a 100644
+--- a/provenance/HANDOFF.md
++++ b/provenance/HANDOFF.md
+@@ -11,3 +11,13 @@ Raw explicitMounts checkpoint is NOT ZMUX compatible. Manager test currently fai
+ Proposed compatibility delta: strict EnvironmentConfigSchema (clear:true, validated name/value map); Linux clearEnvironment/environmentVariables parameters and --clearenv then --setenv; manager forwarding and sanitized returned env; network.airGapped schema empty-allowlist validation; early return before network infrastructure initialization and no proxy wait/socket/ports/helper forwarding when effective airGapped, while retaining network namespace restriction. Test with distinctive ambient secret/proxy values. Review generated git env injection too: no ambient values should be re-encoded after --clearenv. Keep this distinct from raw milestone.
+ 
+ Deliver source commit, distinct versioned local archive, full SHA256/SHA512, lock/dependency provenance and API requirements to /srv/zmux (local:assistant_dbafbcc2) before recommending integration. No credentials/publishing authority established; local delivery only. Dirty ZMUX docs untouched.
++
++## Compatibility checkpoint validation
++
++Raw milestone commit: 8d842fe. Compatibility includes Linux-only rejection, immutable session airGapped mode, skipping ambient parent-proxy resolution, and an inherited-env override in buildPosixGitSafeDirEnv so cleared environments do not encode ambient GIT_CONFIG_COUNT. No system package installed: real rg extracted locally from Ubuntu ripgrep_13.0.0-2ubuntu0.1_amd64.deb (SHA256 cd857d6b567e53cd929d2cab8fc99239e5807d37672ddc86e9a30a81d47ec1f3); extracted executable SHA256 c7b19d09729dca815896b47ccf3f7beca13af202fcb20801034f197a2474ace2. Used only as test PATH dependency. Public baseline lock dependency entries unchanged; root version only changed to 0.0.81-zmux.1. npm ci --offline --ignore-scripts used that lock.
++
++Scoped tests: 104 pass / 1 fail across six suites. Failure in linux-unmakeable-mount-point (WSL setgid-mode assertion: 0750 vs expected 02750) independently reproduced on unmodified c40cf14: 43 pass / same 1 fail. Build/typecheck/lint pass. ExplicitMounts/compat tests pass including live no-network root '/' and '/**', fresh outside/home sentinels plus /etc/hostname and project symlinks, executable helper/bash, cwd /workspace, rw project, ro runtime at existing /mnt, final output and sequential reset. Fresh /etc sentinel creation denied by host permissions; not claimed tested. PTY/cancel/deadline/output/provider matrix remains ZMUX-owned and NOT yet validated.
++
++Important public081 constraint: explicit bind destination needs a creatable mountpoint. A new root-level /runtime fails under root ro-bind with Can't mkdir /runtime: Read-only file system; existing /mnt works. /workspace exists here. Report this constraint to ZMUX for its actual mount destinations; no root redesign or host mkdir workaround introduced.
++
++Archive packaging must copy prebuilt vendor assets unchanged from verified public081 registry package, as upstream release CI builds them separately. Not a new native binary build or native source attestation. Local candidate is for provider matrix only, not integration/security signoff. Registry publication is blocked pending project publisher/release authorization; no publish attempted.
+diff --git a/src/index.ts b/src/index.ts
+index c763cdd..fbb3fc1 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -24,6 +24,7 @@ export {
+   SandboxRuntimeConfigSchema,
+   NetworkConfigSchema,
+   FilesystemConfigSchema,
++  EnvironmentConfigSchema,
+   CredentialsConfigSchema,
+   IgnoreViolationsConfigSchema,
+   RipgrepConfigSchema,
+diff --git a/src/sandbox/linux-sandbox-utils.ts b/src/sandbox/linux-sandbox-utils.ts
+index dd5a083..4ae9b0d 100644
+--- a/src/sandbox/linux-sandbox-utils.ts
++++ b/src/sandbox/linux-sandbox-utils.ts
+@@ -65,6 +65,8 @@ export interface LinuxSandboxParams {
+   /** Environment variable names to unset inside the sandbox (bwrap --unsetenv) */
+   unsetEnvVars?: string[]
+   /** Environment variables to set inside the sandbox (bwrap --setenv NAME VALUE) */
++  clearEnvironment?: boolean
++  environmentVariables?: Record<string, string>
+   setEnvVars?: Record<string, string>
+   /**
+    * Whole-file credential masks: bind fakePath (sentinel content) over
+@@ -3551,6 +3553,8 @@ export async function wrapCommandWithSandboxLinux(
+     javaAgentJarPath,
+     unsetEnvVars,
+     setEnvVars,
++    clearEnvironment = false,
++    environmentVariables,
+     maskedFileBinds,
+     maskedFileStoreDir,
+     enableWeakerNestedSandbox,
+@@ -3583,6 +3587,8 @@ export async function wrapCommandWithSandboxLinux(
+     (maskedFileBinds !== undefined && maskedFileBinds.length > 0)
+   const hasWriteRestrictions = writeConfig !== undefined
+   const hasEnvRestrictions =
++    clearEnvironment ||
++    Object.keys(environmentVariables ?? {}).length > 0 ||
+     (unsetEnvVars !== undefined && unsetEnvVars.length > 0) ||
+     (setEnvVars !== undefined && Object.keys(setEnvVars).length > 0)
+   const hasGitConfig = (gitSafeDirectories?.length ?? 0) > 0
+@@ -3593,7 +3599,8 @@ export async function wrapCommandWithSandboxLinux(
+     !hasReadRestrictions &&
+     !hasWriteRestrictions &&
+     !hasEnvRestrictions &&
+-    !hasGitConfig
++    !hasGitConfig &&
++    !explicitMounts?.length
+   ) {
+     return command
+   }
+@@ -3672,6 +3679,10 @@ export async function wrapCommandWithSandboxLinux(
+     // argument order, so SRT's own proxy plumbing vars survive even if a
+     // caller lists one of them as a denied credential.
+     if (hasEnvRestrictions) {
++      if (clearEnvironment) bwrapArgs.push('--clearenv')
++      for (const [name, value] of Object.entries(environmentVariables ?? {})) {
++        bwrapArgs.push('--setenv', name, value)
++      }
+       for (const name of unsetEnvVars ?? []) {
+         bwrapArgs.push('--unsetenv', name)
+       }
+@@ -3691,6 +3702,9 @@ export async function wrapCommandWithSandboxLinux(
+     if (gitSafeDirectories && gitSafeDirectories.length > 0) {
+       const gitCfg = buildPosixGitSafeDirEnv({
+         safeDirs: gitSafeDirectories,
++        inherited: clearEnvironment
++          ? (environmentVariables ?? {})
++          : process.env,
+         unsetEnvVars,
+         setEnvVars,
+       })
+diff --git a/src/sandbox/sandbox-config.ts b/src/sandbox/sandbox-config.ts
+index ce8e704..1783233 100644
+--- a/src/sandbox/sandbox-config.ts
++++ b/src/sandbox/sandbox-config.ts
+@@ -701,6 +701,12 @@ export const NetworkConfigSchema = z.object({
+     .describe(
+       'If true, hosts not in allowedDomains are denied without consulting the ask callback, and a per-command allow list (registerCommandNetworkLists) is ignored. Set this when allowedDomains is policy enforcement, not a prompt-suppression hint.',
+     ),
++  airGapped: z
++    .boolean()
++    .optional()
++    .describe(
++      'When true, create an isolated network namespace without starting or binding any proxy bridge. This is stronger than an empty allowlist, which preserves a proxy for later policy updates.',
++    ),
+   deniedResolvedAddresses: z
+     .array(addressRangeSchema)
+     .optional()
+@@ -1033,6 +1039,32 @@ export const IgnoreViolationsConfigSchema = z
+ /**
+  * Ripgrep configuration schema
+  */
++const environmentVariableNameSchema = z
++  .string()
++  .regex(
++    /^[A-Za-z_][A-Za-z0-9_]*$/,
++    'Environment variable names must be shell-safe identifiers',
++  )
++
++const environmentVariableValueSchema = z
++  .string()
++  .refine(
++    value => !value.includes('\0'),
++    'Environment variable values must not contain NUL bytes',
++  )
++
++export const EnvironmentConfigSchema = z
++  .object({
++    clear: z
++      .literal(true)
++      .describe('Clear the inherited environment before applying variables'),
++    variables: z
++      .record(environmentVariableNameSchema, environmentVariableValueSchema)
++      .default({})
++      .describe('The complete environment visible to the sandboxed child'),
++  })
++  .strict()
++
+ export const RipgrepConfigSchema = z.object({
+   command: z.string().describe('The ripgrep command to execute'),
+   args: z
+@@ -1212,6 +1244,9 @@ export const SandboxRuntimeConfigSchema = z
+       'Credential handling configuration. Only the explicitly declared files ' +
+         'and environment variables are restricted.',
+     ),
++    environment: EnvironmentConfigSchema.optional().describe(
++      'Optional exact child environment. When set, inherited host environment variables are cleared before these values are applied.',
++    ),
+     ignoreViolations: IgnoreViolationsConfigSchema.optional().describe(
+       'Optional configuration for ignoring specific violations',
+     ),
+@@ -1300,6 +1335,14 @@ export const SandboxRuntimeConfigSchema = z
+     ),
+   })
+   .superRefine((cfg, ctx) => {
++    if (cfg.network.airGapped && cfg.network.allowedDomains.length > 0) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        path: ['network', 'allowedDomains'],
++        message: 'network.airGapped requires an empty allowedDomains list',
++      })
++    }
++
+     const mounts = cfg.filesystem.explicitMounts ?? []
+     for (let index = 0; index < mounts.length; index++) {
+       const mount = mounts[index]!
+diff --git a/src/sandbox/sandbox-manager.ts b/src/sandbox/sandbox-manager.ts
+index 9132171..57b345e 100644
+--- a/src/sandbox/sandbox-manager.ts
++++ b/src/sandbox/sandbox-manager.ts
+@@ -1118,12 +1118,32 @@ async function initialize(
+   }
+ }
+ 
++function assertLinuxPolicy(runtimeConfig: Partial<SandboxRuntimeConfig>): void {
++  if (
++    getPlatform() !== 'linux' &&
++    (runtimeConfig.environment ||
++      runtimeConfig.network?.airGapped ||
++      runtimeConfig.filesystem?.explicitMounts?.length)
++  ) {
++    throw new Error(
++      'explicitMounts, environment and airGapped policies require Linux',
++    )
++  }
++  if (
++    runtimeConfig.network?.airGapped &&
++    runtimeConfig.network.allowedDomains.length > 0
++  ) {
++    throw new Error('network.airGapped requires an empty allowedDomains list')
++  }
++}
++
+ async function initializeSteps(
+   runtimeConfig: SandboxRuntimeConfig,
+   sandboxAskCallback: SandboxAskCallback | undefined,
+   enableLogMonitor: boolean,
+   options: SandboxInitializeOptions | undefined,
+ ): Promise<void> {
++  assertLinuxPolicy(runtimeConfig)
+   // Return if already initializing
+   if (initializationPromise) {
+     await initializationPromise
+@@ -1136,7 +1156,9 @@ async function initializeSteps(
+ 
+   // Resolve parent/upstream proxy from config or HTTP_PROXY env before we
+   // start our own listeners (which will later shadow those vars in the child).
+-  parentProxy = resolveParentProxy(runtimeConfig.network.parentProxy)
++  parentProxy = runtimeConfig.network.airGapped
++    ? undefined
++    : resolveParentProxy(runtimeConfig.network.parentProxy)
+   if (parentProxy) {
+     logForDebugging(
+       `Parent proxy configured: http=${redactUrl(parentProxy.httpUrl)} ` +
+@@ -1509,6 +1531,8 @@ async function initializeSteps(
+     }
+   }
+ 
++  if (config.network.airGapped) return
++
+   // Initialize network infrastructure
+   initializationPromise = (async () => {
+     try {
+@@ -2446,6 +2470,13 @@ async function wrapWithSandboxOnce(
+   options?: WrapWithSandboxOptions,
+ ): Promise<string> {
+   const platform = getPlatform()
++  assertLinuxPolicy(customConfig ?? {})
++  if (
++    customConfig?.network?.airGapped !== undefined &&
++    customConfig.network.airGapped !== config?.network.airGapped
++  ) {
++    throw new Error('Changing airGapped requires reset() then initialize()')
++  }
+   const commandId = options?.commandId
+   registerCommandText(command, options)
+   const startedWith = config
+@@ -2640,7 +2671,9 @@ async function wrapWithSandboxOnce(
+   // Even with empty allowedDomains, we route through proxy so that:
+   // 1. updateConfig() can enable network access for already-running processes
+   // 2. The proxy blocks all requests when allowlist is empty
+-  const needsNetworkProxy = hasNetworkConfig
++  const needsNetworkProxy =
++    hasNetworkConfig &&
++    !(customConfig?.network?.airGapped ?? config?.network.airGapped)
+ 
+   // Wait for network initialization only if proxy is actually needed
+   if (needsNetworkProxy) {
+@@ -2737,6 +2770,10 @@ async function wrapWithSandboxOnce(
+         writeConfig,
+         unsetEnvVars: credentialRestrictions.unsetEnvVars,
+         setEnvVars: credentialRestrictions.setEnvVars,
++        clearEnvironment: (customConfig?.environment ?? config?.environment)
++          ?.clear,
++        environmentVariables: (customConfig?.environment ?? config?.environment)
++          ?.variables,
+         maskedFileBinds: credentialRestrictions.maskedFileBinds,
+         maskedFileStoreDir: credentialRestrictions.maskedFileStoreDir,
+         enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(),
+@@ -2809,6 +2846,7 @@ async function wrapWithSandboxArgv(
+   cwd?: string,
+   options?: WrapWithSandboxOptions,
+ ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
++  assertLinuxPolicy(customConfig ?? {})
+   const platform = getPlatform()
+ 
+   if (platform === 'windows') {
+@@ -2985,7 +3023,11 @@ async function wrapWithSandboxArgv(
+     options,
+   )
+   const shell = binShell ?? '/bin/bash'
+-  return { argv: [shell, '-c', wrapped], env: process.env }
++  const environment = customConfig?.environment ?? config?.environment
++  return {
++    argv: [shell, '-c', wrapped],
++    env: environment?.clear ? { ...environment.variables } : process.env,
++  }
+ }
+ 
+ /**
+@@ -3016,6 +3058,10 @@ function getConfig(): SandboxRuntimeConfig | undefined {
+  * @param newConfig - The new configuration to use
+  */
+ function updateConfig(newConfig: SandboxRuntimeConfig): void {
++  assertLinuxPolicy(newConfig)
++  if (config && newConfig.network.airGapped !== config.network.airGapped) {
++    throw new Error('Changing airGapped requires reset() then initialize()')
++  }
+   if (
+     getPlatform() === 'windows' &&
+     config &&
+@@ -3058,7 +3104,9 @@ function updateConfig(newConfig: SandboxRuntimeConfig): void {
+   // servers capture `parentProxy` by value at creation, so changes here take
+   // effect only on re-initialize. This keeps the state consistent for the
+   // next initialize() call.
+-  parentProxy = resolveParentProxy(newConfig.network.parentProxy)
++  parentProxy = newConfig.network.airGapped
++    ? undefined
++    : resolveParentProxy(newConfig.network.parentProxy)
+   logForDebugging('Sandbox configuration updated')
+ }
+ 
+diff --git a/src/sandbox/sandbox-utils.ts b/src/sandbox/sandbox-utils.ts
+index c85cbbd..8e1910e 100644
+--- a/src/sandbox/sandbox-utils.ts
++++ b/src/sandbox/sandbox-utils.ts
+@@ -1130,12 +1130,13 @@ export function buildGitConfigEnv(opts: {
+  * `wrapCommandWithSandbox{Linux,MacOS}`.
+  */
+ export function buildPosixGitSafeDirEnv(opts: {
++  inherited?: Readonly<Record<string, string | undefined>>
+   safeDirs: readonly string[]
+   unsetEnvVars?: readonly string[]
+   setEnvVars?: Readonly<Record<string, string>>
+ }): Record<string, string> {
+   const baseEnv: Record<string, string | undefined> = {
+-    GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT,
++    GIT_CONFIG_COUNT: (opts.inherited ?? process.env).GIT_CONFIG_COUNT,
+   }
+   for (const k of opts.unsetEnvVars ?? []) delete baseEnv[k]
+   Object.assign(baseEnv, opts.setEnvVars ?? {})

@@ -1317,13 +1317,10 @@ describe.if(isLinux)('Git over SSH through sandbox proxy', () => {
     expect(output).not.toContain('could not resolve hostname')
     expect(output).not.toContain('temporary failure in name resolution')
 
-    // A completed public read or public-key rejection both prove that DNS
-    // resolution and the proxy tunnel reached GitHub. Public repository
-    // access may succeed without an identity depending on GitHub policy.
-    expect(
-      output.includes('permission denied (publickey)') ||
-        /\b[0-9a-f]{40}\s+head\b/.test(output),
-    ).toBeTrue()
+    // With /dev/null as the only identity, github rejects auth after a
+    // successful TCP connect + SSH handshake. Reaching this error proves
+    // DNS resolution and the proxy tunnel both worked.
+    expect(output).toContain('permission denied (publickey)')
   }, 20000)
 
   it('should run git over SSH when the user ssh config enables ControlMaster', async () => {
@@ -1408,7 +1405,7 @@ describe.if(isLinux)('Exit status of a network-restricted wrap', () => {
     const wrapped = await SandboxManager.wrapWithSandbox(command, shell)
     // Only the script that bridges the network carries the trap.
     expect(wrapped).toContain('--unshare-net')
-    expect(wrapped).toContain('TCP-LISTEN:3128')
+    expect(wrapped).toContain('TCP6-LISTEN:3128')
     const result = await spawnAsync(wrapped, {
       shell: true,
       encoding: 'utf8',
