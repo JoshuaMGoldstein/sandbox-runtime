@@ -1184,6 +1184,7 @@ export const WindowsConfigSchema = z.object({
  */
 export const SeccompConfigSchema = z.object({
   applyPath: z.string().optional().describe('Path to the apply-seccomp binary'),
+  guestApplyPath: z.literal('/run/zmux/helpers/apply-seccomp').optional(),
   argv0: z
     .string()
     .optional()

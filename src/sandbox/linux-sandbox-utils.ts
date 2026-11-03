@@ -3591,7 +3591,8 @@ export async function wrapCommandWithSandboxLinux(
     !hasWriteRestrictions &&
     !hasEnvRestrictions &&
     !hasGitConfig &&
-    !explicitMounts?.length
+    !explicitMounts?.length &&
+    !seccompConfig?.guestApplyPath
   ) {
     return command
   }
@@ -3615,16 +3616,67 @@ export async function wrapCommandWithSandboxLinux(
 
   const bwrapArgs: string[] = ['--new-session', '--die-with-parent']
   let applySeccompPrefix: string | undefined
+  let guestHelperSource: string | undefined
 
   try {
+    if (seccompConfig?.guestApplyPath) {
+      if (
+        seccompConfig.guestApplyPath !== '/run/zmux/helpers/apply-seccomp' ||
+        seccompConfig.argv0 ||
+        allowAllUnixSockets ||
+        !seccompConfig.applyPath ||
+        !path.isAbsolute(seccompConfig.applyPath)
+      ) {
+        throw new Error('Invalid guest apply-seccomp configuration')
+      }
+      guestHelperSource = realPathOf(seccompConfig.applyPath)
+      if (!fs.statSync(guestHelperSource).isFile())
+        throw new Error('apply-seccomp must be a regular file')
+      fs.accessSync(guestHelperSource, fs.constants.X_OK)
+      for (const mount of explicitMounts ?? []) {
+        if (
+          !path.isAbsolute(mount.destination) ||
+          path.normalize(mount.destination) !== mount.destination
+        ) {
+          throw new Error('Invalid explicit mount destination')
+        }
+        const resolved = wayTo(mount.destination)
+        if (resolved.notThere && !isAbsenceErrno(resolved.notThere)) {
+          throw new Error('Cannot validate explicit mount destination')
+        }
+        const effective = path.join(resolved.real || '/', ...resolved.rest)
+        if (
+          isAtOrUnder(mount.destination, '/run/zmux') ||
+          isAtOrUnder('/run/zmux', mount.destination) ||
+          isAtOrUnder(effective, '/run/zmux') ||
+          isAtOrUnder('/run/zmux', effective)
+        )
+          throw new Error('Explicit mount conflicts with guest apply-seccomp')
+      }
+      for (const socket of [
+        observeSocketPath,
+        httpSocketPath,
+        socksSocketPath,
+      ]) {
+        if (!socket) continue
+        const resolved = wayTo(socket)
+        if (resolved.notThere && !isAbsenceErrno(resolved.notThere))
+          throw new Error('Cannot validate socket path')
+        const effective = path.join(resolved.real || '/', ...resolved.rest)
+        if (isAtOrUnder(socket, '/run') || isAtOrUnder(effective, '/run'))
+          throw new Error('Socket conflicts with guest helper /run tmpfs')
+      }
+    }
     // ========== SECCOMP FILTER (Unix Socket Blocking) ==========
     // apply-seccomp wraps the workload and applies the baked-in BPF filter
     // that blocks socket(AF_UNIX, ...). Skipped when allowAllUnixSockets is true.
     if (!allowAllUnixSockets) {
-      applySeccompPrefix = resolveApplySeccompPrefix(
-        seccompConfig?.applyPath,
-        seccompConfig?.argv0,
-      )
+      applySeccompPrefix = guestHelperSource
+        ? `${quote([seccompConfig!.guestApplyPath!])} `
+        : resolveApplySeccompPrefix(
+            seccompConfig?.applyPath,
+            seccompConfig?.argv0,
+          )
 
       if (!applySeccompPrefix) {
         logForDebugging(
@@ -3808,6 +3860,38 @@ export async function wrapCommandWithSandboxLinux(
         mount.mode === 'ro' ? '--ro-bind' : '--bind',
         mount.source,
         mount.destination,
+      )
+    }
+    if (guestHelperSource) {
+      const runStat = fs.lstatSync('/run')
+      if (
+        !runStat.isDirectory() ||
+        runStat.isSymbolicLink() ||
+        !readConfig?.denyOnly.includes('/')
+      ) {
+        throw new Error('Guest helper requires a root-denied /run tmpfs')
+      }
+      const runTmpfs = fsArgs.findIndex(
+        (arg, index) => arg === '--tmpfs' && fsArgs[index + 1] === '/run',
+      )
+      if (
+        runTmpfs < 0 ||
+        fsArgs
+          .slice(runTmpfs + 2)
+          .some(arg => arg === '/run' || arg.startsWith('/run/'))
+      ) {
+        throw new Error('Guest helper requires an unoccupied /run tmpfs')
+      }
+      bwrapArgs.push(
+        '--dir',
+        '/run/zmux',
+        '--dir',
+        '/run/zmux/helpers',
+        '--ro-bind',
+        guestHelperSource,
+        seccompConfig!.guestApplyPath!,
+        '--remount-ro',
+        '/run',
       )
     }
     const mounts = {

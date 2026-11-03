@@ -1123,10 +1123,11 @@ function assertLinuxPolicy(runtimeConfig: Partial<SandboxRuntimeConfig>): void {
     getPlatform() !== 'linux' &&
     (runtimeConfig.environment ||
       runtimeConfig.network?.airGapped ||
+      runtimeConfig.seccomp?.guestApplyPath ||
       runtimeConfig.filesystem?.explicitMounts?.length)
   ) {
     throw new Error(
-      'explicitMounts, environment and airGapped policies require Linux',
+      'explicitMounts, environment, guestApplyPath and airGapped policies require Linux',
     )
   }
   if (
